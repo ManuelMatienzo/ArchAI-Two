@@ -9,12 +9,15 @@ import {
 } from 'lucide-react';
 import { PerfilUsuario } from '../../types/auth';
 
-interface LeftNavRailProps {
-  activeTab: 'canvas' | 'team' | 'settings';
-  onSelectTab: (tab: 'canvas' | 'team' | 'settings') => void;
-  currentUser: PerfilUsuario;
+export type NavRailTab = 'canvas' | 'team' | 'settings' | 'projects';
+
+export interface LeftNavRailProps {
+  activeTab: NavRailTab;
+  onSelectTab?: (tab: 'canvas' | 'team' | 'settings') => void;
+  currentUser?: PerfilUsuario;
   onLogout?: () => void;
   onOpenProjects?: () => void;
+  onOpenStudio?: () => void;
 }
 
 export const LeftNavRail: React.FC<LeftNavRailProps> = ({
@@ -22,8 +25,18 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
   onSelectTab,
   currentUser,
   onLogout,
-  onOpenProjects
+  onOpenProjects,
+  onOpenStudio
 }) => {
+  const user = currentUser || {
+    id: 'usr-default',
+    name: 'Arquitecto ArchAI',
+    email: 'arquitecto@archai.io',
+    role: 'ARQUITECTO' as any,
+    avatarColor: '#3b82f6',
+    isHost: true
+  };
+
   return (
     <aside style={{
       width: '56px',
@@ -42,54 +55,69 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
       {/* Top Icons */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
         {/* Brand Icon */}
-        <div style={{
-          width: '36px',
-          height: '36px',
-          borderRadius: '10px',
-          background: 'linear-gradient(135deg, var(--glass-accent), var(--glass-accent-secondary))',
-          border: '1px solid rgba(255, 255, 255, 0.25)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: 'var(--glow-accent)',
-          marginBottom: '8px'
-        }}>
+        <div
+          onClick={onOpenProjects || onOpenStudio}
+          title="ArchAI - Estudio de Arquitectura UML & IA"
+          style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '10px',
+            background: 'linear-gradient(135deg, var(--glass-accent), var(--glass-accent-secondary))',
+            border: '1px solid rgba(255, 255, 255, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: 'var(--glow-accent)',
+            marginBottom: '8px',
+            cursor: (onOpenProjects || onOpenStudio) ? 'pointer' : 'default'
+          }}
+        >
           <Boxes size={19} color="#ffffff" />
         </div>
 
-        {/* Navigation buttons */}
-        {onOpenProjects && (
-          <button
-            onClick={onOpenProjects}
-            title="Hub de Proyectos y Diagramas (CU-02)"
-            style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '10px',
-              border: '1px solid transparent',
-              background: 'transparent',
-              color: 'var(--text-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={e => {
+        {/* Hub de Proyectos (CU-02) */}
+        <button
+          onClick={onOpenProjects}
+          title="Hub de Proyectos y Diagramas (CU-02)"
+          style={{
+            width: '38px',
+            height: '38px',
+            borderRadius: '10px',
+            border: activeTab === 'projects' ? '1px solid color-mix(in srgb, var(--glass-accent) 55%, transparent)' : '1px solid transparent',
+            background: activeTab === 'projects' ? 'color-mix(in srgb, var(--glass-accent) 22%, transparent)' : 'transparent',
+            color: activeTab === 'projects' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: activeTab === 'projects' ? '0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)' : 'none',
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={e => {
+            if (activeTab !== 'projects') {
               e.currentTarget.style.color = '#38bdf8';
               e.currentTarget.style.background = 'rgba(47, 44, 121, 0.12)';
-            }}
-            onMouseLeave={e => {
+            }
+          }}
+          onMouseLeave={e => {
+            if (activeTab !== 'projects') {
               e.currentTarget.style.color = 'var(--text-secondary)';
               e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            <FolderKanban size={18} />
-          </button>
-        )}
+            }
+          }}
+        >
+          <FolderKanban size={18} />
+        </button>
 
+        {/* Estudio UML Canvas */}
         <button
-          onClick={() => onSelectTab('canvas')}
+          onClick={() => {
+            if (onOpenStudio) {
+              onOpenStudio();
+            } else if (onSelectTab) {
+              onSelectTab('canvas');
+            }
+          }}
           title="Studio Canvas UML"
           style={{
             width: '38px',
@@ -105,12 +133,25 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
             boxShadow: activeTab === 'canvas' ? '0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)' : 'none',
             transition: 'all 0.2s ease'
           }}
+          onMouseEnter={e => {
+            if (activeTab !== 'canvas') {
+              e.currentTarget.style.color = '#38bdf8';
+              e.currentTarget.style.background = 'rgba(47, 44, 121, 0.12)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (activeTab !== 'canvas') {
+              e.currentTarget.style.color = 'var(--text-secondary)';
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
         >
           <LayoutGrid size={18} />
         </button>
 
+        {/* Equipo y Colaboradores */}
         <button
-          onClick={() => onSelectTab('team')}
+          onClick={() => onSelectTab && onSelectTab('team')}
           title="Equipo y Colaboración en Tiempo Real"
           style={{
             width: '38px',
@@ -126,12 +167,25 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
             boxShadow: activeTab === 'team' ? '0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)' : 'none',
             transition: 'all 0.2s ease'
           }}
+          onMouseEnter={e => {
+            if (activeTab !== 'team') {
+              e.currentTarget.style.color = '#38bdf8';
+              e.currentTarget.style.background = 'rgba(47, 44, 121, 0.12)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (activeTab !== 'team') {
+              e.currentTarget.style.color = 'var(--text-secondary)';
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
         >
           <Users size={18} />
         </button>
 
+        {/* Configuración */}
         <button
-          onClick={() => onSelectTab('settings')}
+          onClick={() => onSelectTab && onSelectTab('settings')}
           title="Configuración"
           style={{
             width: '38px',
@@ -147,6 +201,18 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
             boxShadow: activeTab === 'settings' ? '0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)' : 'none',
             transition: 'all 0.2s ease'
           }}
+          onMouseEnter={e => {
+            if (activeTab !== 'settings') {
+              e.currentTarget.style.color = '#38bdf8';
+              e.currentTarget.style.background = 'rgba(47, 44, 121, 0.12)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (activeTab !== 'settings') {
+              e.currentTarget.style.color = 'var(--text-secondary)';
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
         >
           <Settings size={18} />
         </button>
@@ -155,23 +221,23 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
       {/* Bottom User Avatar & Logout */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
         <div
-          title={`${currentUser.name} (${currentUser.role})`}
+          title={`${user.name} (${user.role})`}
           style={{
             width: '34px',
             height: '34px',
             borderRadius: '50%',
-            backgroundColor: currentUser.avatarColor || '#334155',
+            backgroundColor: user.avatarColor || '#3b82f6',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontWeight: 800,
             fontSize: '0.8rem',
             color: '#ffffff',
-            boxShadow: `0 0 12px ${currentUser.avatarColor || '#334155'}`,
+            boxShadow: `0 0 12px ${user.avatarColor || '#3b82f6'}`,
             cursor: 'pointer'
           }}
         >
-          {currentUser.name.charAt(0)}
+          {user.name.charAt(0).toUpperCase()}
         </div>
 
         {onLogout && (

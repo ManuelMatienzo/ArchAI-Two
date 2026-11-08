@@ -7,3 +7,4 @@ export * from './GlassDropdown';
 export * from './GlassSidebar';
 export * from './GlassChatBubble';
 export * from './GlassModal';
+export * from './GlassLoadingScreen';

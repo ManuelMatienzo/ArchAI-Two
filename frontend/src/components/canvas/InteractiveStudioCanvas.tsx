@@ -27,7 +27,8 @@ import {
   BookOpen,
   Building2,
   Settings,
-  ArrowUpDown
+  ArrowUpDown,
+  Crosshair
 } from 'lucide-react';
 import { ModeloDiagrama, ClaseUml, AtributoUml, MetodoUml, RelacionUml, Visibilidad, TipoRelacion } from '../../types/uml';
 import { InformacionSesion } from '../../types/auth';
@@ -61,11 +62,11 @@ interface InteractiveStudioCanvasProps {
   onChangeUserColor?: (color: string) => void;
   remoteCursors?: { id: string; name: string; color: string; x: number; y: number }[];
   onCursorMove?: (pos: { x: number; y: number }) => void;
-  // Colaboración en vivo (CU-03): permite emitir el diagrama DURANTE el arrastre (no sólo al soltar)
-  // y avisar al padre cuándo un arrastre está en curso (para evitar guardados masivos en la nube).
+  // ColaboraciÃ³n en vivo (CU-03): permite emitir el diagrama DURANTE el arrastre (no sÃ³lo al soltar)
+  // y avisar al padre cuÃ¡ndo un arrastre estÃ¡ en curso (para evitar guardados masivos en la nube).
   onLiveDragUpdate?: (diagram: ModeloDiagrama) => void;
   onDragStateChange?: (dragging: boolean) => void;
-  // CU-03 · Arrastre colaborativo fluido a 60 FPS
+  // CU-03 Â· Arrastre colaborativo fluido a 60 FPS
   onNodeDrag?: (classId: string, pos: { x: number; y: number }) => void;
   remoteDraggingNodes?: Record<string, { name: string; color: string }>;
   // Triggers externos desde la paleta de herramientas
@@ -89,11 +90,14 @@ interface InteractiveStudioCanvasProps {
   onCopyClass?: () => void;
   onPasteClass?: () => void;
   onDuplicateClass?: () => void;
+  /** Enfoque de cámara centrado sobre una clase (Spotlight Quick Search) */
+  focusTarget?: { classId: string; tick: number } | null;
+  onOpenQuickSearch?: () => void;
 }
 
 const PALETTE_COLORS = [
-  { hex: '#334155', name: 'Gray Shadow (Anfitrión)' },
-  { hex: '#4a4891', name: 'Índigo Sobrio (Colaborador A)' },
+  { hex: '#334155', name: 'Gray Shadow (AnfitriÃ³n)' },
+  { hex: '#4a4891', name: 'Ãndigo Sobrio (Colaborador A)' },
   { hex: '#8892b0', name: 'Gris Lunar (Colaborador B)' },
   { hex: '#e8c39e', name: 'Arena (Colaborador C)' },
   { hex: '#5c688c', name: 'Pizarra Azul (Colaborador D)' },
@@ -137,11 +141,13 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   onOpenShortcutsModal,
   onCopyClass,
   onPasteClass,
-  onDuplicateClass
+  onDuplicateClass,
+  focusTarget,
+  onOpenQuickSearch
 }) => {
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  // Modo de rueda de ratón: 'zoom' (la rueda hace zoom directamente) o 'pan' (la rueda desplaza el lienzo; Ctrl+rueda hace zoom)
+  // Modo de rueda de ratÃ³n: 'zoom' (la rueda hace zoom directamente) o 'pan' (la rueda desplaza el lienzo; Ctrl+rueda hace zoom)
   const [wheelZoomMode, setWheelZoomMode] = useState<'zoom' | 'pan'>(() => {
     try {
       const saved = localStorage.getItem('archai_wheel_zoom_mode');
@@ -176,7 +182,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const [newClassLinkWithTargetId, setNewClassLinkWithTargetId] = useState<string>('');
   const [newClassLinkRelType, setNewClassLinkRelType] = useState<TipoRelacion>('ASSOCIATION_1_N');
 
-  // Enlazador Rápido desde la Tarjeta (Fast Linker Popover)
+  // Enlazador RÃ¡pido desde la Tarjeta (Fast Linker Popover)
   const [cardFastLinkerClassId, setCardFastLinkerClassId] = useState<string | null>(null);
   const [fastLinkTargetClassId, setFastLinkTargetClassId] = useState<string>('');
   const [fastLinkRelType, setFastLinkRelType] = useState<TipoRelacion>('ASSOCIATION_1_N');
@@ -207,7 +213,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const [selectedRelationType, setSelectedRelationType] = useState<TipoRelacion>('ASSOCIATION_1_N');
   const [isRelationMode, setIsRelationMode] = useState<boolean>(false);
 
-  // Toast flotante reactivo para confirmaciones en lienzo (descomposición N:M, etc.)
+  // Toast flotante reactivo para confirmaciones en lienzo (descomposiciÃ³n N:M, etc.)
   const [canvasToast, setCanvasToast] = useState<string | null>(null);
   const canvasToastTimerRef = useRef<any>(null);
 
@@ -219,7 +225,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     }, 4500);
   };
 
-  // Estados de interacción con relaciones (hover, selección y eliminación rápida)
+  // Estados de interacciÃ³n con relaciones (hover, selecciÃ³n y eliminaciÃ³n rÃ¡pida)
   const [hoveredRelationId, setHoveredRelationId] = useState<string | null>(null);
   const [selectedRelationId, setSelectedRelationId] = useState<string | null>(null);
   const [relationBarPosition, setRelationBarPosition] = useState<'top' | 'bottom'>('top');
@@ -236,6 +242,83 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const selectedRelationIdRef = useRef<string | null>(null);
   const selectedClassIdRef = useRef<string | null>(null);
   const editingClassIdRef = useRef<string | null>(null);
+
+  // Selección múltiple de clases UML (Shift + Clic, Marquee Box, Ctrl+A)
+  const [selectedClassIds, setSelectedClassIdsState] = useState<Set<string>>(() => {
+    return selectedClassId ? new Set([selectedClassId]) : new Set();
+  });
+  const selectedClassIdsRef = useRef<Set<string>>(new Set());
+
+  const setSelectedClassIds = useCallback((next: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    setSelectedClassIdsState(prev => {
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      selectedClassIdsRef.current = resolved;
+      return resolved;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (selectedClassId) {
+      setSelectedClassIds(prev => {
+        if (prev.has(selectedClassId) && prev.size === 1) return prev;
+        return new Set([selectedClassId]);
+      });
+    } else {
+      setSelectedClassIds(prev => (prev.size <= 1 ? new Set() : prev));
+    }
+  }, [selectedClassId, setSelectedClassIds]);
+
+  // Arrastre coordinado a 60 FPS en selección múltiple
+  const multiDragInitialPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const multiDragDeltaRef = useRef<{ deltaX: number; deltaY: number } | null>(null);
+  const [multiDragDelta, setMultiDragDelta] = useState<{ deltaX: number; deltaY: number } | null>(null);
+
+  // Herramienta activa del lienzo ('pan' para mano de desplazamiento, 'select' para selección por recuadro)
+  const [canvasTool, setCanvasTool] = useState<'pan' | 'select'>('pan');
+
+  // Recuadro de selección Marquee (Figma / Miro style)
+  const isMarqueeSelectingRef = useRef<boolean>(false);
+  const marqueeBoxRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+  const [marqueeBox, setMarqueeBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+
+  // Pulso visual de enfoque (Spotlight / Quick Search)
+  const [focusedClassPulseId, setFocusedClassPulseId] = useState<string | null>(null);
+
+  // Enfocar suavemente una clase en el centro del viewport del lienzo
+  const handleFocusClass = useCallback((classId: string, zoomLevel?: number) => {
+    const target = diagram.classes.find(c => c.id === classId);
+    if (!target || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const pos = target.position || { x: 100, y: 100 };
+    const dims = nodeDimensionsRef.current.get(classId) || { w: 330, h: 200 };
+    const targetZoom = zoomLevel ?? Math.max(0.75, Math.min(1.15, zoomRef.current));
+
+    const centerX = pos.x + dims.w / 2;
+    const centerY = pos.y + dims.h / 2;
+
+    const newPanX = Math.round(rect.width / 2 - centerX * targetZoom);
+    const newPanY = Math.round(rect.height / 2 - centerY * targetZoom);
+
+    setZoom(targetZoom);
+    zoomRef.current = targetZoom;
+    setPan({ x: newPanX, y: newPanY });
+    panRef.current = { x: newPanX, y: newPanY };
+
+    onSelectClass(classId);
+    setSelectedClassIds(new Set([classId]));
+
+    setFocusedClassPulseId(classId);
+    setTimeout(() => {
+      setFocusedClassPulseId(prev => (prev === classId ? null : prev));
+    }, 2400);
+  }, [diagram.classes, onSelectClass, setSelectedClassIds]);
+
+  useEffect(() => {
+    if (focusTarget && focusTarget.classId) {
+      handleFocusClass(focusTarget.classId);
+    }
+  }, [focusTarget, handleFocusClass]);
 
   useEffect(() => { selectedRelationIdRef.current = selectedRelationId; }, [selectedRelationId]);
   useEffect(() => { selectedClassIdRef.current = selectedClassId; }, [selectedClassId]);
@@ -288,12 +371,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   // Color picker popover state
   const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
 
-  // Modales interactivos de personalización arquitectónica manual (UML 2.5 / 3FN)
+  // Modales interactivos de personalizaciÃ³n arquitectÃ³nica manual (UML 2.5 / 3FN)
   const [decomposerModalData, setDecomposerModalData] = useState<{ srcClass: ClaseUml; tgtClass: ClaseUml; relIdToRemove?: string } | null>(null);
   const [extractSuperclassClasses, setExtractSuperclassClasses] = useState<ClaseUml[] | null>(null);
 
-  // Cursores de colaboradores remotos en vivo (CU-03 · STOMP)
-  // Únicamente se muestran los cursores de compañeros REALES transmitidos por WebSocket (nunca el propio)
+  // Cursores de colaboradores remotos en vivo (CU-03 Â· STOMP)
+  // Ãšnicamente se muestran los cursores de compaÃ±eros REALES transmitidos por WebSocket (nunca el propio)
   const activeRemoteCursors = useMemo(() => {
     return (remoteCursors || []).filter(c => c.id !== session.currentUser?.id);
   }, [remoteCursors, session.currentUser?.id]);
@@ -313,7 +396,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   // Cooldown para evitar que el evento mousedown fantasma tras un drop inicie un paneo no deseado
   const lastDropTimeRef = useRef<number>(0);
 
-  // Colaboración en vivo (CU-03): throttle para publicar el diagrama DURANTE el arrastre
+  // ColaboraciÃ³n en vivo (CU-03): throttle para publicar el diagrama DURANTE el arrastre
   const lastLivePublishRef = useRef<number>(0);
 
   useEffect(() => { panRef.current = pan; }, [pan]);
@@ -340,7 +423,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   useEffect(() => { diagramStateRef.current = diagram; }, [diagram]);
   useEffect(() => { onUpdateDiagramRef.current = onUpdateDiagram; }, [onUpdateDiagram]);
 
-  // Sincronizar ref de modo rueda de ratón ('zoom' | 'pan') y persistir en localStorage
+  // Sincronizar ref de modo rueda de ratÃ³n ('zoom' | 'pan') y persistir en localStorage
   const wheelZoomModeRef = useRef(wheelZoomMode);
   useEffect(() => {
     wheelZoomModeRef.current = wheelZoomMode;
@@ -394,7 +477,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         return;
       }
 
-      // Si el usuario está escribiendo texto en un input/textarea, no interceptar atajos de edición de nodos
+      // Si el usuario estÃ¡ escribiendo texto en un input/textarea, no interceptar atajos de ediciÃ³n de nodos
       if (isInputFocused) return;
 
       // 2. Deshacer: Ctrl+Z (sin Shift)
@@ -455,7 +538,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         return;
       }
 
-      // 9b. Alternar modo de rueda del ratón (Zoom continuo vs Desplazamiento): Alt + M
+      // 9b. Alternar modo de rueda del ratÃ³n (Zoom continuo vs Desplazamiento): Alt + M
       if (e.altKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         setWheelZoomMode(m => m === 'zoom' ? 'pan' : 'zoom');
@@ -469,6 +552,27 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         return;
       }
 
+      // 10b. Seleccionar todo el diagrama: Ctrl + A o Cmd + A
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+        const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName);
+        if (!isInput && !editingClassIdRef.current) {
+          e.preventDefault();
+          const allIds = new Set(diagramStateRef.current.classes.map(c => c.id));
+          setSelectedClassIds(allIds);
+          if (allIds.size > 0) {
+            onSelectClass(diagramStateRef.current.classes[0].id);
+          }
+          return;
+        }
+      }
+
+      // 10c. Búsqueda rápida Spotlight: Ctrl + K o Cmd + K
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        onOpenQuickSearch?.();
+        return;
+      }
+
       // 11. Barra espaciadora para paneo ultra fluido estilo Figma/Miro
       if (e.code === 'Space' && !isSpacePressedRef.current) {
         isSpacePressedRef.current = true;
@@ -476,39 +580,67 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       }
 
       // 12. Micro-desplazamiento con teclas de flecha (Nudge de 8px o 40px con Shift)
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && selectedClassIdRef.current && !editingClassIdRef.current) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && (selectedClassIdsRef.current.size > 0 || selectedClassIdRef.current) && !editingClassIdRef.current) {
+        const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName);
+        if (isInput) return;
+
         e.preventDefault();
         const step = e.shiftKey ? 40 : 8;
         const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0;
         const dy = e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0;
-        const clsId = selectedClassIdRef.current;
         const currentDiagram = diagramStateRef.current;
-        const targetCls = currentDiagram.classes.find(c => c.id === clsId);
-        if (targetCls) {
-          const currentPos = targetCls.position || { x: 100, y: 100 };
-          const newPos = {
-            x: Math.max(0, currentPos.x + dx),
-            y: Math.max(0, currentPos.y + dy)
-          };
-          onUpdateDiagramRef.current({
-            ...currentDiagram,
-            classes: currentDiagram.classes.map(c => c.id === clsId ? { ...c, position: newPos } : c),
-            updatedAt: new Date().toISOString()
-          });
-        }
+        const activeIds = selectedClassIdsRef.current.size > 0
+          ? selectedClassIdsRef.current
+          : (selectedClassIdRef.current ? new Set([selectedClassIdRef.current]) : new Set<string>());
+
+        onUpdateDiagramRef.current({
+          ...currentDiagram,
+          classes: currentDiagram.classes.map(c => {
+            if (activeIds.has(c.id)) {
+              const currentPos = c.position || { x: 100, y: 100 };
+              return {
+                ...c,
+                position: {
+                  x: Math.max(0, currentPos.x + dx),
+                  y: Math.max(0, currentPos.y + dy)
+                }
+              };
+            }
+            return c;
+          }),
+          updatedAt: new Date().toISOString()
+        });
         return;
       }
 
-      // 13. Suprimir / Retroceso para eliminar la relación o clase seleccionada
+      // 13. Suprimir / Retroceso para eliminar la relación o clases seleccionadas
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName);
+        if (isInput || editingClassIdRef.current) return;
+
         if (selectedRelationIdRef.current) {
           e.preventDefault();
           handleDeleteRelationSafe(selectedRelationIdRef.current);
-        } else if (selectedClassIdRef.current && !editingClassIdRef.current) {
+        } else if (selectedClassIdsRef.current.size > 1) {
+          e.preventDefault();
+          const toDelete = selectedClassIdsRef.current;
+          const currentDiagram = diagramStateRef.current;
+          onUpdateDiagramRef.current({
+            ...currentDiagram,
+            classes: currentDiagram.classes.filter(c => !toDelete.has(c.id)),
+            relations: currentDiagram.relations.filter(r => !toDelete.has(r.sourceClassId) && !toDelete.has(r.targetClassId)),
+            updatedAt: new Date().toISOString()
+          });
+          setSelectedClassIds(new Set());
+          onSelectClass(null);
+        } else if (selectedClassIdRef.current) {
           e.preventDefault();
           onDeleteClass(selectedClassIdRef.current);
+          setSelectedClassIds(new Set());
         }
       } else if (e.key === 'Escape') {
+        setSelectedClassIds(new Set());
+        onSelectClass(null);
         setSelectedRelationId(null);
         selectedRelationIdRef.current = null;
         setConnectingSourceId(null);
@@ -559,13 +691,13 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
       const { vx, vy } = autoPanVelocityRef.current;
       if (vx !== 0 || vy !== 0) {
-        // Desplazar el lienzo suavemente en la dirección del borde
+        // Desplazar el lienzo suavemente en la direcciÃ³n del borde
         const nextPanX = panRef.current.x - vx;
         const nextPanY = panRef.current.y - vy;
         panRef.current = { x: nextPanX, y: nextPanY };
         setPan({ x: nextPanX, y: nextPanY });
 
-        // Actualizar la posición de la tabla en tiempo real en coordenadas de mundo durante el auto-pan
+        // Actualizar la posiciÃ³n de la tabla en tiempo real en coordenadas de mundo durante el auto-pan
         if (lastMoveRef.current) {
           const data = lastMoveRef.current;
           const mX = data.clientX - data.left;
@@ -617,7 +749,29 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
     // Deseleccionar cualquier relación activa al interactuar con una tabla
     setSelectedRelationId(null);
-    onSelectClass(cls.id);
+
+    // Lógica de selección múltiple (Shift + clic / Ctrl + clic)
+    const isShiftOrCtrl = e.shiftKey || e.ctrlKey || e.metaKey;
+    let nextSelected = new Set(selectedClassIdsRef.current);
+
+    if (isShiftOrCtrl) {
+      if (nextSelected.has(cls.id)) {
+        nextSelected.delete(cls.id);
+      } else {
+        nextSelected.add(cls.id);
+      }
+      setSelectedClassIds(nextSelected);
+      onSelectClass(nextSelected.size > 0 ? (nextSelected.has(cls.id) ? cls.id : Array.from(nextSelected)[0]) : null);
+    } else {
+      // Si la clase ya estaba en la selección múltiple, preservamos el grupo para arrastrarlo junto
+      if (!nextSelected.has(cls.id)) {
+        nextSelected = new Set([cls.id]);
+        setSelectedClassIds(nextSelected);
+        onSelectClass(cls.id);
+      } else {
+        onSelectClass(cls.id);
+      }
+    }
 
     // Si el usuario no tiene permisos de edición (ej. Observador), no permitir arrastrar
     if (userPermissions && !userPermissions.canEditDiagram) {
@@ -638,6 +792,24 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     dragOffsetRef.current = { x: offsetX, y: offsetY };
     setDragPos(null);
     dragPosRef.current = null;
+
+    // Si hay varias clases seleccionadas que incluyen a esta, capturar las posiciones iniciales de todas
+    if (nextSelected.size > 1 && nextSelected.has(cls.id)) {
+      const initialMap = new Map<string, { x: number; y: number }>();
+      diagram.classes.forEach(c => {
+        if (nextSelected.has(c.id)) {
+          initialMap.set(c.id, c.position || { x: 100, y: 100 });
+        }
+      });
+      multiDragInitialPositionsRef.current = initialMap;
+      multiDragDeltaRef.current = { deltaX: 0, deltaY: 0 };
+      setMultiDragDelta({ deltaX: 0, deltaY: 0 });
+    } else {
+      multiDragInitialPositionsRef.current.clear();
+      multiDragDeltaRef.current = null;
+      setMultiDragDelta(null);
+    }
+
     // CU-03 · Notificar inicio de arrastre para que el padre no castigue la nube con guardados intermedios
     onDragStateChange?.(true);
   };
@@ -670,12 +842,36 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         target.closest('textarea')
       );
 
+      // Si es selección por recuadro (Shift + clic o herramienta "select" en zona vacía)
+      if (!isInteractive && e.button === 0 && (e.shiftKey || canvasTool === 'select')) {
+        const rect = canvasRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const worldX = (mouseX - panRef.current.x) / zoomRef.current;
+        const worldY = (mouseY - panRef.current.y) / zoomRef.current;
+
+        isMarqueeSelectingRef.current = true;
+        marqueeBoxRef.current = {
+          startX: worldX,
+          startY: worldY,
+          currentX: worldX,
+          currentY: worldY
+        };
+        setMarqueeBox(marqueeBoxRef.current);
+        if (!e.shiftKey) {
+          setSelectedClassIds(new Set());
+          onSelectClass(null);
+        }
+        return;
+      }
+
       // Si es botón central, barra espaciadora, o clic en cualquier zona no interactiva del lienzo
       if (e.button === 1 || isSpacePressedRef.current || !isInteractive) {
         if (e.button === 1 || isSpacePressedRef.current) {
           e.preventDefault();
         }
         onSelectClass(null);
+        setSelectedClassIds(new Set());
         setSelectedRelationId(null);
         setConnectingSourceId(null);
         setConnectingMousePos(null);
@@ -692,10 +888,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!canvasRef.current) return;
 
-    // Auto-recuperación ante desincronización de eventos de ratón:
-    // Si ningún botón físico del ratón está presionado (e.buttons === 0),
-    // es IMPOSIBLE que el usuario esté arrastrando o paneando activamente.
-    // Si quedaron banderas residuales por drops o pérdida de foco, cancelamos de inmediato.
+    // Auto-recuperaciÃ³n ante desincronizaciÃ³n de eventos de ratÃ³n:
+    // Si ningÃºn botÃ³n fÃ­sico del ratÃ³n estÃ¡ presionado (e.buttons === 0),
+    // es IMPOSIBLE que el usuario estÃ© arrastrando o paneando activamente.
+    // Si quedaron banderas residuales por drops o pÃ©rdida de foco, cancelamos de inmediato.
     if (e.buttons === 0) {
       if (isPanningRef.current || draggingClassIdRef.current) {
         handleMouseUp();
@@ -708,7 +904,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // CU-03 · Emitir coordenadas del ratón en tiempo real al broker STOMP para compañeros remotos
+    // CU-03 Â· Emitir coordenadas del ratÃ³n en tiempo real al broker STOMP para compaÃ±eros remotos
     if (onCursorMove) {
       const worldX = Math.round((mouseX - panRef.current.x) / zoomRef.current);
       const worldY = Math.round((mouseY - panRef.current.y) / zoomRef.current);
@@ -720,6 +916,19 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       const worldX = Math.round((mouseX - panRef.current.x) / zoomRef.current);
       const worldY = Math.round((mouseY - panRef.current.y) / zoomRef.current);
       setConnectingMousePos({ x: worldX, y: worldY });
+    }
+
+    // Seguimiento del recuadro de selección Marquee
+    if (isMarqueeSelectingRef.current && marqueeBoxRef.current) {
+      const worldX = Math.round((mouseX - panRef.current.x) / zoomRef.current);
+      const worldY = Math.round((mouseY - panRef.current.y) / zoomRef.current);
+      marqueeBoxRef.current = {
+        ...marqueeBoxRef.current,
+        currentX: worldX,
+        currentY: worldY
+      };
+      setMarqueeBox({ ...marqueeBoxRef.current });
+      return;
     }
 
     // Buffer dragging/panning to requestAnimationFrame
@@ -770,7 +979,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         const currentX = currentWorldMouseX - dragOffsetRef.current.x;
         const currentY = currentWorldMouseY - dragOffsetRef.current.y;
         
-        // Alineación limpia a grilla de 8px (Snap to Grid)
+        // AlineaciÃ³n limpia a grilla de 8px (Snap to Grid)
         const SNAP = 8;
         const nextX = Math.round(currentX / SNAP) * SNAP;
         const nextY = Math.round(currentY / SNAP) * SNAP;
@@ -779,9 +988,19 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         dragPosRef.current = next;
         setDragPos(next);
 
+        const targetId = draggingClassIdRef.current;
+
+        // Coordinación de arrastre grupal a 60 FPS en selección múltiple
+        if (targetId && multiDragInitialPositionsRef.current && multiDragInitialPositionsRef.current.size > 1) {
+          const origin = multiDragInitialPositionsRef.current.get(targetId) || { x: 0, y: 0 };
+          const deltaX = nextX - origin.x;
+          const deltaY = nextY - origin.y;
+          multiDragDeltaRef.current = { deltaX, deltaY };
+          setMultiDragDelta({ deltaX, deltaY });
+        }
+
         // CU-03 · Colaboración fluida en tiempo real: transmitir coordenadas del nodo a ~33 FPS (~30ms)
         const ahora = Date.now();
-        const targetId = draggingClassIdRef.current;
         if (targetId && onNodeDrag && ahora - lastLivePublishRef.current >= 30) {
           lastLivePublishRef.current = ahora;
           onNodeDrag(targetId, next);
@@ -830,6 +1049,40 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       frameRef.current = null;
     }
 
+    // Finalizar selección por recuadro (Marquee Box)
+    if (isMarqueeSelectingRef.current && marqueeBoxRef.current) {
+      isMarqueeSelectingRef.current = false;
+      const box = marqueeBoxRef.current;
+      marqueeBoxRef.current = null;
+      setMarqueeBox(null);
+
+      const minX = Math.min(box.startX, box.currentX);
+      const maxX = Math.max(box.startX, box.currentX);
+      const minY = Math.min(box.startY, box.currentY);
+      const maxY = Math.max(box.startY, box.currentY);
+
+      if ((maxX - minX) > 8 || (maxY - minY) > 8) {
+        const newlySelected = new Set<string>();
+        diagram.classes.forEach(cls => {
+          const pos = cls.position || { x: 100, y: 100 };
+          const dims = nodeDimensionsRef.current.get(cls.id);
+          const w = dims?.w && dims.w > 80 ? dims.w : 330;
+          const h = dims?.h && dims.h > 80 ? dims.h : 200;
+          if (pos.x + w >= minX && pos.x <= maxX && pos.y + h >= minY && pos.y <= maxY) {
+            newlySelected.add(cls.id);
+          }
+        });
+
+        setSelectedClassIds(newlySelected);
+        if (newlySelected.size > 0) {
+          onSelectClass(Array.from(newlySelected)[0]);
+        } else {
+          onSelectClass(null);
+        }
+      }
+      return;
+    }
+
     const targetClassId = draggingClassIdRef.current || draggingClassId;
     let finalPos = dragPosRef.current;
 
@@ -850,15 +1103,35 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     }
 
     if (targetClassId && finalPos) {
-      const updatedClasses = diagram.classes.map(c => {
-        if (c.id === targetClassId) {
-          return {
-            ...c,
-            position: { x: finalPos.x, y: finalPos.y }
-          };
-        }
-        return c;
-      });
+      const SNAP = 8;
+      let updatedClasses = diagram.classes;
+
+      if (selectedClassIdsRef.current.size > 1 && selectedClassIdsRef.current.has(targetClassId) && multiDragDeltaRef.current) {
+        const { deltaX, deltaY } = multiDragDeltaRef.current;
+        updatedClasses = diagram.classes.map(c => {
+          if (selectedClassIdsRef.current.has(c.id)) {
+            const origin = multiDragInitialPositionsRef.current.get(c.id) || c.position || { x: 100, y: 100 };
+            return {
+              ...c,
+              position: {
+                x: Math.round((origin.x + deltaX) / SNAP) * SNAP,
+                y: Math.round((origin.y + deltaY) / SNAP) * SNAP
+              }
+            };
+          }
+          return c;
+        });
+      } else {
+        updatedClasses = diagram.classes.map(c => {
+          if (c.id === targetClassId) {
+            return {
+              ...c,
+              position: { x: finalPos.x, y: finalPos.y }
+            };
+          }
+          return c;
+        });
+      }
 
       onUpdateDiagram({
         ...diagram,
@@ -866,6 +1139,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         updatedAt: new Date().toISOString()
       });
     }
+
+    multiDragInitialPositionsRef.current.clear();
+    multiDragDeltaRef.current = null;
+    setMultiDragDelta(null);
 
     isPanningRef.current = false;
     setIsPanning(false);
@@ -881,7 +1158,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   // Captura global de mousemove y mouseup para arrastre ultra fluido y continuo sin perder foco
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
-      if (!draggingClassIdRef.current && !isPanningRef.current) return;
+      if (!draggingClassIdRef.current && !isPanningRef.current && !isMarqueeSelectingRef.current) return;
       if (e.buttons === 0) {
         handleMouseUp();
         return;
@@ -889,12 +1166,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       handleMouseMove(e as unknown as React.MouseEvent);
     };
     const handleGlobalMouseUp = () => {
-      if (draggingClassIdRef.current || isPanningRef.current) {
+      if (draggingClassIdRef.current || isPanningRef.current || isMarqueeSelectingRef.current) {
         handleMouseUp();
       }
     };
     const handleGlobalBlur = () => {
-      if (draggingClassIdRef.current || isPanningRef.current) {
+      if (draggingClassIdRef.current || isPanningRef.current || isMarqueeSelectingRef.current) {
         handleMouseUp();
       }
     };
@@ -928,7 +1205,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     }
   };
 
-  // Control dual de rueda de ratón:
+  // Control dual de rueda de ratÃ³n:
   // - Modo 'zoom' (predeterminado): La rueda hace zoom focal sobre el cursor. Shift+rueda desplaza horizontal. Alt+rueda desplaza vertical.
   // - Modo 'pan': La rueda desplaza verticalmente y horizontalmente el lienzo. Ctrl+rueda (o gesto trackpad pinch) hace zoom focal continuo.
   useEffect(() => {
@@ -936,7 +1213,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     if (!canvasEl) return;
 
     const handleNativeWheel = (e: WheelEvent) => {
-      // Si el cursor está sobre un panel flotante (Toolbox, dock, etc.),
+      // Si el cursor estÃ¡ sobre un panel flotante (Toolbox, dock, etc.),
       // dejar que el navegador haga scroll nativo dentro del panel
       // en lugar de interactuar con el lienzo.
       const objetivo = e.target as HTMLElement | null;
@@ -975,9 +1252,9 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         return;
       }
 
-      // Determinar si esta interacción debe hacer zoom o desplazamiento (pan):
-      // - Si está en modo 'zoom': Hace zoom continuo focal sobre el cursor.
-      // - Si está en modo 'pan': Solo hace zoom si se presiona Ctrl/Meta (o gesto pinch de trackpad).
+      // Determinar si esta interacciÃ³n debe hacer zoom o desplazamiento (pan):
+      // - Si estÃ¡ en modo 'zoom': Hace zoom continuo focal sobre el cursor.
+      // - Si estÃ¡ en modo 'pan': Solo hace zoom si se presiona Ctrl/Meta (o gesto pinch de trackpad).
       const shouldZoom = isZoomMode || isPinchOrCtrl;
 
       if (!shouldZoom) {
@@ -1003,7 +1280,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       const worldX = (mouseX - currentPan.x) / currentZoom;
       const worldY = (mouseY - currentPan.y) / currentZoom;
 
-      // Factor de zoom fluido y continuo (soporta rueda de ratón estándar o trackpad pinch)
+      // Factor de zoom fluido y continuo (soporta rueda de ratÃ³n estÃ¡ndar o trackpad pinch)
       let zoomFactor: number;
       if (Math.abs(e.deltaY) < 25) {
         zoomFactor = 1 - e.deltaY * 0.006;
@@ -1011,11 +1288,11 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         zoomFactor = e.deltaY < 0 ? 1.10 : 0.90;
       }
 
-      // Rango masivo desbloqueado de 0.05x (visión global de 100k px) a 4.0x (ultra-detalle)
+      // Rango masivo desbloqueado de 0.05x (visiÃ³n global de 100k px) a 4.0x (ultra-detalle)
       const nextZoom = Math.max(0.05, Math.min(4.0, Number((currentZoom * zoomFactor).toFixed(3))));
       if (nextZoom === currentZoom) return;
 
-      // Mantener fija en pantalla la posición del elemento apuntado por el cursor
+      // Mantener fija en pantalla la posiciÃ³n del elemento apuntado por el cursor
       const nextPanX = Math.round(mouseX - worldX * nextZoom);
       const nextPanY = Math.round(mouseY - worldY * nextZoom);
 
@@ -1026,9 +1303,140 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       setPan({ x: nextPanX, y: nextPanY });
     };
 
+    // Soporte táctil nativo (Tablets, iPads, laptops touch y móviles): Paneo fluido y Zoom con Pinzas (Pinch-to-zoom)
+    const touchState = {
+      mode: 'none' as 'none' | 'pan' | 'pinch',
+      startX: 0,
+      startY: 0,
+      startPanX: 0,
+      startPanY: 0,
+      initialDist: 0,
+      initialZoom: 1,
+      worldFocalX: 0,
+      worldFocalY: 0,
+    };
+    let touchRaf: number | null = null;
+
+    const handleNativeTouchStart = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target != null &&
+        typeof target.closest === 'function' &&
+        target.closest(
+          '.glass-toolbox-panel, .glass-command-dock, .glass-command-dock-toggle, .glass-flyout, .glass-panel, .modal-backdrop, input, textarea, button, form'
+        )
+      ) {
+        return;
+      }
+
+      if (e.touches.length === 1) {
+        touchState.mode = 'pan';
+        touchState.startX = e.touches[0].clientX;
+        touchState.startY = e.touches[0].clientY;
+        touchState.startPanX = panRef.current.x;
+        touchState.startPanY = panRef.current.y;
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        touchState.mode = 'pinch';
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+        touchState.initialDist = Math.max(dist, 10);
+        touchState.initialZoom = zoomRef.current;
+
+        const rect = canvasEl.getBoundingClientRect();
+        const midX = (t0.clientX + t1.clientX) / 2 - rect.left;
+        const midY = (t0.clientY + t1.clientY) / 2 - rect.top;
+
+        touchState.worldFocalX = (midX - panRef.current.x) / zoomRef.current;
+        touchState.worldFocalY = (midY - panRef.current.y) / zoomRef.current;
+      }
+    };
+
+    const handleNativeTouchMove = (e: TouchEvent) => {
+      if (touchState.mode === 'none') return;
+
+      if (touchState.mode === 'pan' && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - touchState.startX;
+        const dy = e.touches[0].clientY - touchState.startY;
+
+        if (Math.hypot(dx, dy) > 4) {
+          e.preventDefault();
+          const nextPanX = Math.round(touchState.startPanX + dx);
+          const nextPanY = Math.round(touchState.startPanY + dy);
+          panRef.current = { x: nextPanX, y: nextPanY };
+
+          if (touchRaf === null) {
+            touchRaf = requestAnimationFrame(() => {
+              setPan({ x: panRef.current.x, y: panRef.current.y });
+              touchRaf = null;
+            });
+          }
+        }
+      } else if (touchState.mode === 'pinch' && e.touches.length === 2) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+        const factor = dist / touchState.initialDist;
+
+        const nextZoom = Math.max(
+          0.05,
+          Math.min(4.0, Number((touchState.initialZoom * factor).toFixed(3)))
+        );
+        if (nextZoom === zoomRef.current) return;
+
+        const rect = canvasEl.getBoundingClientRect();
+        const midX = (t0.clientX + t1.clientX) / 2 - rect.left;
+        const midY = (t0.clientY + t1.clientY) / 2 - rect.top;
+
+        const nextPanX = Math.round(midX - touchState.worldFocalX * nextZoom);
+        const nextPanY = Math.round(midY - touchState.worldFocalY * nextZoom);
+
+        zoomRef.current = nextZoom;
+        panRef.current = { x: nextPanX, y: nextPanY };
+
+        if (touchRaf === null) {
+          touchRaf = requestAnimationFrame(() => {
+            setZoom(zoomRef.current);
+            setPan({ x: panRef.current.x, y: panRef.current.y });
+            touchRaf = null;
+          });
+        }
+      }
+    };
+
+    const handleNativeTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) {
+        touchState.mode = 'none';
+        if (touchRaf !== null) {
+          cancelAnimationFrame(touchRaf);
+          touchRaf = null;
+        }
+      } else if (e.touches.length === 1 && touchState.mode === 'pinch') {
+        touchState.mode = 'pan';
+        touchState.startX = e.touches[0].clientX;
+        touchState.startY = e.touches[0].clientY;
+        touchState.startPanX = panRef.current.x;
+        touchState.startPanY = panRef.current.y;
+      }
+    };
+
     canvasEl.addEventListener('wheel', handleNativeWheel, { passive: false });
+    canvasEl.addEventListener('touchstart', handleNativeTouchStart, { passive: false });
+    canvasEl.addEventListener('touchmove', handleNativeTouchMove, { passive: false });
+    canvasEl.addEventListener('touchend', handleNativeTouchEnd, { passive: true });
+    canvasEl.addEventListener('touchcancel', handleNativeTouchEnd, { passive: true });
+
     return () => {
       canvasEl.removeEventListener('wheel', handleNativeWheel);
+      canvasEl.removeEventListener('touchstart', handleNativeTouchStart);
+      canvasEl.removeEventListener('touchmove', handleNativeTouchMove);
+      canvasEl.removeEventListener('touchend', handleNativeTouchEnd);
+      canvasEl.removeEventListener('touchcancel', handleNativeTouchEnd);
+      if (touchRaf !== null) {
+        cancelAnimationFrame(touchRaf);
+      }
     };
   }, []);
 
@@ -1087,13 +1495,13 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     });
   };
 
-  // ─── Descomposición N:M en Clase Asociativa (UML 2.5 / 3FN) ───
+  // â”€â”€â”€ DescomposiciÃ³n N:M en Clase Asociativa (UML 2.5 / 3FN) â”€â”€â”€
   const createIntermediateTableNM = (
     srcClass: ClaseUml,
     tgtClass: ClaseUml,
     existingRelIdToRemove?: string
   ) => {
-    // Inferencia semántica universal mediante el motor de ontologías de dominio (9 dominios + universal)
+    // Inferencia semÃ¡ntica universal mediante el motor de ontologÃ­as de dominio (9 dominios + universal)
     const sugerencia = inferirTablaIntermedia(srcClass, tgtClass, diagram.classes);
 
     const srcPos = srcClass.position || { x: 100, y: 100 };
@@ -1114,9 +1522,9 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       methods: sugerencia.metodos
     };
 
-    // En UML 2.5 estándar, la relación de asociación entre las dos entidades principales (ej. Venta y Producto)
+    // En UML 2.5 estÃ¡ndar, la relaciÃ³n de asociaciÃ³n entre las dos entidades principales (ej. Venta y Producto)
     // se conserva con multiplicidades '*' y '1..*', y se enlaza la Clase Asociativa mediante associationClassId
-    // para trazar la línea punteada reglamentaria.
+    // para trazar la lÃ­nea punteada reglamentaria.
     let updatedRelations: RelacionUml[];
     if (existingRelIdToRemove) {
       updatedRelations = diagram.relations.map(r => {
@@ -1163,7 +1571,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     showCanvasToast(`Tabla intermedia "${sugerencia.nombreClase}" (${sugerencia.dominio}) creada con 2 relaciones 1:N (UML 2.5 / 3FN)`);
   };
 
-  // Confirmar creación personalizada desde IntermediateTableDecomposerModal
+  // Confirmar creaciÃ³n personalizada desde IntermediateTableDecomposerModal
   const handleConfirmDecomposerModal = (
     newClass: ClaseUml,
     _rel1Config: { sourceMultiplicity: string; targetMultiplicity: string; label: string },
@@ -1230,10 +1638,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     setSelectedRelationId(null);
     selectedRelationIdRef.current = null;
     setDecomposerModalData(null);
-    showCanvasToast(`Clase asociativa "${intermediateClass.name}" creada con éxito (UML 2.5)`);
+    showCanvasToast(`Clase asociativa "${intermediateClass.name}" creada con Ã©xito (UML 2.5)`);
   };
 
-  // Confirmar extracción de superclase desde ExtractSuperclassModal
+  // Confirmar extracciÃ³n de superclase desde ExtractSuperclassModal
   const handleConfirmExtractSuperclass = (
     superclass: ClaseUml,
     updatedSubclasses: ClaseUml[],
@@ -1254,10 +1662,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
     onSelectClass(superclass.id);
     setExtractSuperclassClasses(null);
-    showCanvasToast(`Superclase "${superclass.name}" extraída con ${inheritanceRelations.length} relaciones de herencia (──▷)`);
+    showCanvasToast(`Superclase "${superclass.name}" extraÃ­da con ${inheritanceRelations.length} relaciones de herencia (â”€â”€â–·)`);
   };
 
-  // Enlace rápido directo desde el popover de la tarjeta
+  // Enlace rÃ¡pido directo desde el popover de la tarjeta
   const handleFastLinkSubmit = (sourceClassId: string, customSrcMult?: string, customTgtMult?: string) => {
     if (!fastLinkTargetClassId || sourceClassId === fastLinkTargetClassId) return;
 
@@ -1266,8 +1674,8 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     else if (fastLinkRelType === 'AGGREGATION') defaultLabel = 'agrega';
     else if (fastLinkRelType === 'INHERITANCE') defaultLabel = 'extiende';
     else if (fastLinkRelType === 'REALIZATION') defaultLabel = 'implementa';
-    else if (fastLinkRelType === 'DEPENDENCY' || fastLinkRelType === 'USAGE') defaultLabel = '«use»';
-    else if (fastLinkRelType === 'PACKAGE_IMPORT') defaultLabel = '«import»';
+    else if (fastLinkRelType === 'DEPENDENCY' || fastLinkRelType === 'USAGE') defaultLabel = 'Â«useÂ»';
+    else if (fastLinkRelType === 'PACKAGE_IMPORT') defaultLabel = 'Â«importÂ»';
     else if (fastLinkRelType === 'NON_NAVIGABLE') defaultLabel = 'no_navegable';
     else if (fastLinkRelType === 'ASSOCIATION_1_N') defaultLabel = 'tiene';
     else if (fastLinkRelType === 'ASSOCIATION_N_M') defaultLabel = 'vincula';
@@ -1276,7 +1684,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const srcMult = isSpecial ? '' : (customSrcMult !== undefined ? customSrcMult : (fastLinkRelType === 'ASSOCIATION_N_M' ? '*' : '1'));
     const tgtMult = isSpecial ? '' : (customTgtMult !== undefined ? customTgtMult : (fastLinkRelType === 'COMPOSITION' ? '1..*' : fastLinkRelType === 'ASSOCIATION_1_1' ? '1' : fastLinkRelType === 'NON_NAVIGABLE' ? '0' : '*'));
 
-    // Regla UML 2.5 / 3FN: Si la relación es N:M (o multiplicidad * y *), descomponer automáticamente en tabla intermedia
+    // Regla UML 2.5 / 3FN: Si la relaciÃ³n es N:M (o multiplicidad * y *), descomponer automÃ¡ticamente en tabla intermedia
     if (fastLinkRelType === 'ASSOCIATION_N_M' || (srcMult === '*' && tgtMult === '*')) {
       const srcClass = diagram.classes.find(c => c.id === sourceClassId);
       const tgtClass = diagram.classes.find(c => c.id === fastLinkTargetClassId);
@@ -1324,7 +1732,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       });
     }
 
-    // Seleccionar automáticamente la nueva relación para desplegar la barra de cardinalidad
+    // Seleccionar automÃ¡ticamente la nueva relaciÃ³n para desplegar la barra de cardinalidad
     setSelectedRelationId(newRel.id);
     selectedRelationIdRef.current = newRel.id;
 
@@ -1407,7 +1815,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       });
     }
 
-    // Ubicación inteligente para evitar solapamientos y no desbordar
+    // UbicaciÃ³n inteligente para evitar solapamientos y no desbordar
     const index = diagram.classes.length;
     const maxCols = 3;
     const posX = 60 + (index % maxCols) * 350;
@@ -1427,7 +1835,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       handleFitToScreen([...diagram.classes, createdClass]);
     }, 60);
 
-    // Si seleccionó enlace inmediato con otra tabla
+    // Si seleccionÃ³ enlace inmediato con otra tabla
     if (newClassLinkWithTargetId) {
       const target = diagram.classes.find(c => c.id === newClassLinkWithTargetId);
       if (target) {
@@ -1554,7 +1962,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const tgtClass = diagram.classes.find(c => c.id === targetId);
     if (!srcClass || !tgtClass) return;
 
-    // Regla UML 2.5 / 3FN: Si la relación seleccionada es Muchos a Muchos (N:M), descomponer automáticamente en tabla intermedia
+    // Regla UML 2.5 / 3FN: Si la relaciÃ³n seleccionada es Muchos a Muchos (N:M), descomponer automÃ¡ticamente en tabla intermedia
     if (selectedRelationType === 'ASSOCIATION_N_M') {
       createIntermediateTableNM(srcClass, tgtClass);
       setConnectingMousePos(null);
@@ -1598,12 +2006,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         break;
       case 'DEPENDENCY':
       case 'USAGE':
-        defaultLabel = '«use»';
+        defaultLabel = 'Â«useÂ»';
         srcMult = '';
         tgtMult = '';
         break;
       case 'PACKAGE_IMPORT':
-        defaultLabel = '«import»';
+        defaultLabel = 'Â«importÂ»';
         srcMult = '';
         tgtMult = '';
         break;
@@ -1650,12 +2058,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       });
     }
 
-    // Seleccionar automáticamente la nueva relación para gestionar su cardinalidad en la barra superior
+    // Seleccionar automÃ¡ticamente la nueva relaciÃ³n para gestionar su cardinalidad en la barra superior
     setSelectedRelationId(newRel.id);
     selectedRelationIdRef.current = newRel.id;
   };
 
-  // ─── Gestión Integral de Relaciones y Cardinalidad UML 2.5 ───
+  // â”€â”€â”€ GestiÃ³n Integral de Relaciones y Cardinalidad UML 2.5 â”€â”€â”€
 
   const handleUpdateRelation = (relationId: string, updates: Partial<RelacionUml>) => {
     const updated = diagram.relations.map(r => {
@@ -1713,12 +2121,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         break;
       case 'DEPENDENCY':
       case 'USAGE':
-        defaultLabel = '«use»';
+        defaultLabel = 'Â«useÂ»';
         srcMult = '';
         tgtMult = '';
         break;
       case 'PACKAGE_IMPORT':
-        defaultLabel = '«import»';
+        defaultLabel = 'Â«importÂ»';
         srcMult = '';
         tgtMult = '';
         break;
@@ -1767,7 +2175,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     });
   };
 
-  // ─── Handlers de la Toolbox UML 2.5+ ───
+  // â”€â”€â”€ Handlers de la Toolbox UML 2.5+ â”€â”€â”€
 
   const handleInsertClassifierFromToolbox = (def: DefClasificadorUml) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -1967,7 +2375,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const rect = canvasRef.current.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
 
-    // Calcular límites envolventes (bounding box) de todas las clases
+    // Calcular lÃ­mites envolventes (bounding box) de todas las clases
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -1993,7 +2401,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const diagramW = Math.max(100, maxX - minX);
     const diagramH = Math.max(100, maxY - minY);
 
-    // Márgenes seguros: 40px a los lados, 40px arriba, 95px abajo para librar el Dock perfectamente
+    // MÃ¡rgenes seguros: 40px a los lados, 40px arriba, 95px abajo para librar el Dock perfectamente
     const padX = 40;
     const padTop = 40;
     const padBottom = 95;
@@ -2006,7 +2414,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     // Si cabe al 100%, dejamos 1.0. Si no cabe, escalamos fluidamente hasta 0.08
     const idealZoom = Number(Math.min(1.0, Math.max(0.08, Math.min(scaleX, scaleY))).toFixed(2));
 
-    // Centrar en el área visible segura
+    // Centrar en el Ã¡rea visible segura
     const targetCenterX = padX + availW / 2;
     const targetCenterY = padTop + availH / 2;
 
@@ -2022,7 +2430,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     setPan({ x: targetPanX, y: targetPanY });
   };
 
-  // Auto-Organizar en capas arquitectónicas limpias, compactas y proporcionales
+  // Auto-Organizar en capas arquitectÃ³nicas limpias, compactas y proporcionales
   const handleAutoOrganize = () => {
     const layerCols: Record<string, ClaseUml[]> = {
       Controller: [],
@@ -2045,7 +2453,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const totalClasses = diagram.classes.length;
 
     if (totalClasses <= 4) {
-      // Distribución limpia y compacta de 2 niveles:
+      // DistribuciÃ³n limpia y compacta de 2 niveles:
       // Nivel Superior (y: 40): Controller -> Service -> Repository
       // Nivel Inferior (y: 300): Entity
       const controllers = layerCols.Controller;
@@ -2077,7 +2485,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         arranged.push({ ...c, position: { x: 60 + idx * 350, y: 300 } });
       });
     } else {
-      // Distribución multi-columna para arquitecturas grandes (máximo 3 columnas de 350px)
+      // DistribuciÃ³n multi-columna para arquitecturas grandes (mÃ¡ximo 3 columnas de 350px)
       const MAX_COLS = 3;
       const colOrder = ['Controller', 'Service', 'Repository', 'Entity', 'Other'];
       const allOrdered: ClaseUml[] = [];
@@ -2102,13 +2510,13 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       updatedAt: new Date().toISOString()
     });
 
-    // Auto-ajustar inmediatamente el zoom y pan a la nueva disposición compacta
+    // Auto-ajustar inmediatamente el zoom y pan a la nueva disposiciÃ³n compacta
     setTimeout(() => {
       handleFitToScreen(arranged);
     }, 60);
   };
 
-  // Auto-ajustar automáticamente al cargar o cambiar de diagrama
+  // Auto-ajustar automÃ¡ticamente al cargar o cambiar de diagrama
   const lastFittedDiagramRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -2136,14 +2544,30 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   // Local preview of classes while dragging (committed to the diagram on mouse up)
   const displayedClasses = useMemo(() => {
     if (!draggingClassId || !dragPos) return diagram.classes;
+    if (multiDragDelta && selectedClassIds.size > 1 && selectedClassIds.has(draggingClassId)) {
+      const { deltaX, deltaY } = multiDragDelta;
+      return diagram.classes.map(c => {
+        if (selectedClassIds.has(c.id)) {
+          const origin = multiDragInitialPositionsRef.current.get(c.id) || c.position || { x: 100, y: 100 };
+          return {
+            ...c,
+            position: {
+              x: origin.x + deltaX,
+              y: origin.y + deltaY
+            }
+          };
+        }
+        return c;
+      });
+    }
     return diagram.classes.map(c =>
       c.id === draggingClassId ? { ...c, position: dragPos } : c
     );
-  }, [diagram.classes, draggingClassId, dragPos]);
+  }, [diagram.classes, draggingClassId, dragPos, multiDragDelta, selectedClassIds]);
 
   // Calculate SVG connector paths dynamically with ultra-smooth cubic bezier S-curves and true node bounding boxes
   const relationPaths = useMemo(() => {
-    // Helper para estimar altura si el elemento aún no ha sido medido en el DOM
+    // Helper para estimar altura si el elemento aÃºn no ha sido medido en el DOM
     const estimarAlturaFallback = (cls: ClaseUml, totalRelaciones: number): number => {
       const attrCount = cls.attributes?.length || 0;
       const methodCount = cls.methods?.length || 0;
@@ -2197,7 +2621,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
     // Descartar aristas binarias directas hacia clases asociativas en el trazado visual (UML 2.5)
     const relationsToRender = diagram.relations.filter(rel => {
-      // Si la arista apunta o nace de una clase asociativa, NO renderizarla como línea binaria
+      // Si la arista apunta o nace de una clase asociativa, NO renderizarla como lÃ­nea binaria
       if (activeAssocClassIds.has(rel.sourceClassId) || activeAssocClassIds.has(rel.targetClassId)) {
         return false;
       }
@@ -2400,7 +2824,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         }
       }
 
-      // Puntos de control Bézier cúbicos con curvatura fluida y tangencia
+      // Puntos de control BÃ©zier cÃºbicos con curvatura fluida y tangencia
       let c1X = startX;
       let c1Y = startY;
       let c2X = endX;
@@ -2440,7 +2864,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
       const pathD = `M ${startX} ${startY} C ${c1X} ${c1Y}, ${c2X} ${c2Y}, ${endX} ${endY}`;
 
-      // Punto medio matemático exacto de la curva Bézier cúbica en t = 0.5 (garantiza que la pastilla esté sobre la línea)
+      // Punto medio matemÃ¡tico exacto de la curva BÃ©zier cÃºbica en t = 0.5 (garantiza que la pastilla estÃ© sobre la lÃ­nea)
       const midX = 0.125 * startX + 0.375 * c1X + 0.375 * c2X + 0.125 * endX;
       const midY = 0.125 * startY + 0.375 * c1Y + 0.375 * c2Y + 0.125 * endY;
 
@@ -2477,12 +2901,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         tgtMultY = endY + 16;
       }
 
-      // UML 2.5: Cálculo del conector punteado para la Clase Asociativa
+      // UML 2.5: CÃ¡lculo del conector punteado para la Clase Asociativa
       let assocClassPathD: string | undefined = undefined;
       let assocId = rel.associationClassId;
 
       if (!assocId && (rel.type === 'ASSOCIATION_N_M' || (rel.sourceMultiplicity?.includes('*') && rel.targetMultiplicity?.includes('*')))) {
-        // Inferencia automática universal para diagramas con clase asociativa si no está explícitamente seteada
+        // Inferencia automÃ¡tica universal para diagramas con clase asociativa si no estÃ¡ explÃ­citamente seteada
         const candidateAssoc = displayedClasses.find(c =>
           activeAssocClassIds.has(c.id) &&
           c.id !== rel.sourceClassId &&
@@ -2545,7 +2969,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const userColor = session.currentUser?.avatarColor || 'var(--accent-primary)';
 
   // ============================================================================
-  // REFACTOR 2026-09-26 Â· RENDIMIENTO 60 FPS
+  // REFACTOR 2026-09-26 Ã‚Â· RENDIMIENTO 60 FPS
   // Callbacks ESTABLES (identidad constante) para React.memo de UmlNodeCard y
   // RelationLayer. Patron "latest-ref": un ref se re-asigna en cada render con
   // los handlers frescos, y los useCallback con deps vacias delegan en ese ref.
@@ -2569,8 +2993,116 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   }, []);
 
   const handleClearClassSelection = useCallback(() => {
+    setSelectedClassIds(new Set());
     onSelectClass(null);
-  }, [onSelectClass]);
+  }, [onSelectClass, setSelectedClassIds]);
+
+  // Alinear Horizontalmente (Borde Superior)
+  const handleAlignTop = () => {
+    if (selectedClassIdsRef.current.size < 2) return;
+    let minY = Infinity;
+    diagram.classes.forEach(c => {
+      if (selectedClassIdsRef.current.has(c.id)) {
+        minY = Math.min(minY, c.position?.y ?? 100);
+      }
+    });
+    if (!isFinite(minY)) return;
+
+    onUpdateDiagram({
+      ...diagram,
+      classes: diagram.classes.map(c => selectedClassIdsRef.current.has(c.id) ? { ...c, position: { x: c.position?.x ?? 100, y: minY } } : c),
+      updatedAt: new Date().toISOString()
+    });
+  };
+
+  // Alinear Verticalmente (Borde Izquierdo)
+  const handleAlignLeft = () => {
+    if (selectedClassIdsRef.current.size < 2) return;
+    let minX = Infinity;
+    diagram.classes.forEach(c => {
+      if (selectedClassIdsRef.current.has(c.id)) {
+        minX = Math.min(minX, c.position?.x ?? 100);
+      }
+    });
+    if (!isFinite(minX)) return;
+
+    onUpdateDiagram({
+      ...diagram,
+      classes: diagram.classes.map(c => selectedClassIdsRef.current.has(c.id) ? { ...c, position: { x: minX, y: c.position?.y ?? 100 } } : c),
+      updatedAt: new Date().toISOString()
+    });
+  };
+
+  // Distribuir Horizontalmente
+  const handleDistributeHorizontal = () => {
+    if (selectedClassIdsRef.current.size < 3) return;
+    const selected = diagram.classes
+      .filter(c => selectedClassIdsRef.current.has(c.id))
+      .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0));
+
+    const firstX = selected[0].position?.x ?? 0;
+    const lastX = selected[selected.length - 1].position?.x ?? 0;
+    const totalSpan = lastX - firstX;
+    const spacing = totalSpan / (selected.length - 1);
+
+    const posMap = new Map<string, number>();
+    selected.forEach((cls, idx) => {
+      posMap.set(cls.id, Math.round((firstX + idx * spacing) / 8) * 8);
+    });
+
+    onUpdateDiagram({
+      ...diagram,
+      classes: diagram.classes.map(c => posMap.has(c.id) ? { ...c, position: { x: posMap.get(c.id) ?? (c.position?.x ?? 100), y: c.position?.y ?? 100 } } : c),
+      updatedAt: new Date().toISOString()
+    });
+  };
+
+  // Duplicar Clases Seleccionadas
+  const handleDuplicateSelected = () => {
+    if (selectedClassIdsRef.current.size === 0) return;
+    const newClasses: ClaseUml[] = [];
+    const newSelected = new Set<string>();
+
+    diagram.classes.forEach(c => {
+      if (selectedClassIdsRef.current.has(c.id)) {
+        const newId = `cls-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        const dup: ClaseUml = {
+          ...c,
+          id: newId,
+          name: `${c.name}Copy`,
+          position: {
+            x: (c.position?.x ?? 100) + 40,
+            y: (c.position?.y ?? 100) + 40
+          },
+          attributes: (c.attributes || []).map(a => ({ ...a, id: `attr-${newId}-${Math.random().toString(36).slice(2, 6)}` })),
+          methods: (c.methods || []).map(m => ({ ...m, id: `m-${newId}-${Math.random().toString(36).slice(2, 6)}` }))
+        };
+        newClasses.push(dup);
+        newSelected.add(newId);
+      }
+    });
+
+    onUpdateDiagram({
+      ...diagram,
+      classes: [...diagram.classes, ...newClasses],
+      updatedAt: new Date().toISOString()
+    });
+    setSelectedClassIds(newSelected);
+  };
+
+  // Eliminar Clases Seleccionadas
+  const handleDeleteSelected = () => {
+    if (selectedClassIdsRef.current.size === 0) return;
+    const toDelete = selectedClassIdsRef.current;
+    onUpdateDiagram({
+      ...diagram,
+      classes: diagram.classes.filter(c => !toDelete.has(c.id)),
+      relations: diagram.relations.filter(r => !toDelete.has(r.sourceClassId) && !toDelete.has(r.targetClassId)),
+      updatedAt: new Date().toISOString()
+    });
+    setSelectedClassIds(new Set());
+    onSelectClass(null);
+  };
 
   const canvasHandlersRef = useRef<{
     handleClassMouseDown: typeof handleClassMouseDown;
@@ -2721,14 +3253,14 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             }}
           >
             <Plus size={20} color="var(--accent-primary)" />
-            <span>Suelta aquí para colocar el clasificador en el lienzo</span>
+            <span>Suelta aquÃ­ para colocar el clasificador en el lienzo</span>
           </div>
         </div>
       )}
       {/* Ambient Grid & Dot Pattern Sincronizado 1:1 con Pan y Zoom */}
         <CanvasBackdrop pan={pan} zoom={zoom} />
 
-      {/* SVG Definitions & Relation Lines Layer (Área masiva de 200,000px sin fronteras ni cortes) */}
+      {/* SVG Definitions & Relation Lines Layer (Ãrea masiva de 200,000px sin fronteras ni cortes) */}
       <svg
         style={{
           position: 'absolute',
@@ -2757,7 +3289,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           onCycleMultiplicity={stableOnCycleMultiplicity}
         />
 
-        {/* Línea elástica interactiva que sigue el ratón mientras se conecta (Rubber-band) */}
+        {/* LÃ­nea elÃ¡stica interactiva que sigue el ratÃ³n mientras se conecta (Rubber-band) */}
         {connectingSourceId && connectingMousePos && (() => {
           const src = diagram.classes.find(c => c.id === connectingSourceId);
           if (!src) return null;
@@ -2786,6 +3318,23 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             </g>
           );
         })()}
+
+        {/* Recuadro de Selección Múltiple (Marquee / Box Selection) */}
+        {marqueeBox && (
+          <g pointerEvents="none" className="marquee-selection-box">
+            <rect
+              x={Math.min(marqueeBox.startX, marqueeBox.currentX)}
+              y={Math.min(marqueeBox.startY, marqueeBox.currentY)}
+              width={Math.abs(marqueeBox.currentX - marqueeBox.startX)}
+              height={Math.abs(marqueeBox.currentY - marqueeBox.startY)}
+              fill="rgba(56, 189, 248, 0.12)"
+              stroke="#38bdf8"
+              strokeWidth={1.5 / zoom}
+              strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+              rx={3 / zoom}
+            />
+          </g>
+        )}
       </svg>
 
       {/* Connecting Mode Banner */}
@@ -2812,8 +3361,8 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             <LinkIcon size={16} color="var(--accent-cyan)" />
             <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {connectingSourceId
-                ? `Conectar: [${diagram.classes.find(c => c.id === connectingSourceId)?.name || 'Origen'}] ➔ Haz clic en la tabla DESTINO`
-                : 'Modo Conexión: Haz clic en la tabla ORIGEN en el lienzo'}
+                ? `Conectar: [${diagram.classes.find(c => c.id === connectingSourceId)?.name || 'Origen'}] âž” Haz clic en la tabla DESTINO`
+                : 'Modo ConexiÃ³n: Haz clic en la tabla ORIGEN en el lienzo'}
             </span>
             {selectedRelationType === 'ASSOCIATION_N_M' && (
               <span style={{
@@ -2829,7 +3378,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 gap: '4px'
               }}>
                 <Sparkles size={11} color="#fef08a" />
-                <span>Auto-descomposición en Tabla Intermedia (UML 2.5 / 3FN)</span>
+                <span>Auto-descomposiciÃ³n en Tabla Intermedia (UML 2.5 / 3FN)</span>
               </span>
             )}
           </div>
@@ -2840,14 +3389,14 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               { key: 'ASSOCIATION_1_N' as TipoRelacion, label: '1:N' },
               { key: 'ASSOCIATION_N_M' as TipoRelacion, label: 'N:M' },
               { key: 'ASSOCIATION_BINARY' as TipoRelacion, label: 'Binaria' },
-              { key: 'AGGREGATION' as TipoRelacion, label: 'Agregación' },
-              { key: 'COMPOSITION' as TipoRelacion, label: 'Composición' },
+              { key: 'AGGREGATION' as TipoRelacion, label: 'AgregaciÃ³n' },
+              { key: 'COMPOSITION' as TipoRelacion, label: 'ComposiciÃ³n' },
               { key: 'INHERITANCE' as TipoRelacion, label: 'Herencia' },
-              { key: 'REALIZATION' as TipoRelacion, label: 'Realización' },
+              { key: 'REALIZATION' as TipoRelacion, label: 'RealizaciÃ³n' },
               { key: 'DEPENDENCY' as TipoRelacion, label: 'Dependencia' },
-              { key: 'USAGE' as TipoRelacion, label: '«use»' },
-              { key: 'PACKAGE_IMPORT' as TipoRelacion, label: '«import»' },
-              { key: 'NON_NAVIGABLE' as TipoRelacion, label: 'No Nav. ✕' }
+              { key: 'USAGE' as TipoRelacion, label: 'Â«useÂ»' },
+              { key: 'PACKAGE_IMPORT' as TipoRelacion, label: 'Â«importÂ»' },
+              { key: 'NON_NAVIGABLE' as TipoRelacion, label: 'No Nav. âœ•' }
             ]).map(rt => (
               <button
                 key={rt.key}
@@ -2883,14 +3432,14 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               display: 'flex',
               alignItems: 'center'
             }}
-            title="Cancelar conexión"
+            title="Cancelar conexiÃ³n"
           >
             <X size={16} />
           </button>
         </div>
       )}
 
-      {/* Barra Flotante de Gestión de Relación Seleccionada (HUD Ergonómico y Compacto) */}
+      {/* Barra Flotante de GestiÃ³n de RelaciÃ³n Seleccionada (HUD ErgonÃ³mico y Compacto) */}
       {selectedRelationId && (() => {
         const rel = diagram.relations.find(r => r.id === selectedRelationId);
         if (!rel) return null;
@@ -2901,7 +3450,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         const isManyToMany = rel.type === 'ASSOCIATION_N_M' ||
           (['*', '0..*', '1..*'].includes(rel.sourceMultiplicity || '') && ['*', '0..*', '1..*'].includes(rel.targetMultiplicity || ''));
 
-        // Modo colapsado (píldora minimalista que no tapa nada en el lienzo)
+        // Modo colapsado (pÃ­ldora minimalista que no tapa nada en el lienzo)
         if (isRelationBarCollapsed) {
           return (
             <div
@@ -2931,7 +3480,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 <span style={{ color: '#f5e1ce', fontWeight: 800, fontSize: '0.76rem' }}>
                   {src?.name || 'Origen'}
                 </span>
-                <span style={{ color: '#e8c39e', fontSize: '0.72rem' }}>➔</span>
+                <span style={{ color: '#e8c39e', fontSize: '0.72rem' }}>âž”</span>
                 <span style={{ color: '#f5e1ce', fontWeight: 800, fontSize: '0.76rem' }}>
                   {tgt?.name || 'Destino'}
                 </span>
@@ -2968,7 +3517,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   borderRadius: '6px',
                   border: '1px solid rgba(232, 195, 158, 0.25)'
                 }}
-                title="Expandir panel de relación"
+                title="Expandir panel de relaciÃ³n"
               >
                 <span>Editar</span>
                 <ChevronDown size={13} />
@@ -3009,7 +3558,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   display: 'flex',
                   alignItems: 'center'
                 }}
-                title="Deseleccionar relación (Escape)"
+                title="Deseleccionar relaciÃ³n (Escape)"
               >
                 <X size={14} />
               </button>
@@ -3045,7 +3594,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           >
             {/* Fila 1: Entidades conectadas, Rol/Etiqueta y Acciones principales */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
-              {/* Clases conectadas con botón de inversión */}
+              {/* Clases conectadas con botÃ³n de inversiÃ³n */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                 <div style={{
                   width: '24px',
@@ -3089,9 +3638,9 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                       cursor: 'pointer',
                       border: '1px solid rgba(232, 195, 158, 0.25)'
                     }}
-                    title="Invertir dirección Origen ⇄ Destino"
+                    title="Invertir direcciÃ³n Origen â‡„ Destino"
                   >
-                    ⇄
+                    â‡„
                   </button>
                 )}
 
@@ -3109,7 +3658,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 </span>
               </div>
 
-              {/* Rol / Etiqueta de la relación */}
+              {/* Rol / Etiqueta de la relaciÃ³n */}
               {canEdit && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '0.70rem', color: '#e8c39e', fontWeight: 700, textTransform: 'uppercase' }}>
@@ -3137,7 +3686,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 </div>
               )}
 
-              {/* Botones de acción derecha */}
+              {/* Botones de acciÃ³n derecha */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                 {/* Descomponer N:M si corresponde */}
                 {canEdit && isManyToMany && src && tgt && (
@@ -3159,7 +3708,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                         gap: '5px',
                         boxShadow: '0 2px 10px rgba(124, 58, 237, 0.4)'
                       }}
-                      title="Descomponer automáticamente en Tabla Intermedia (UML 2.5 / 3FN)"
+                      title="Descomponer automÃ¡ticamente en Tabla Intermedia (UML 2.5 / 3FN)"
                     >
                       <Sparkles size={12} color="#fef08a" />
                       <span>Descomponer (3FN)</span>
@@ -3188,7 +3737,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   </div>
                 )}
 
-                {/* Botón Eliminar */}
+                {/* BotÃ³n Eliminar */}
                 {canEdit && (
                   <button
                     onClick={(e) => {
@@ -3209,7 +3758,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                       gap: '4px',
                       transition: 'all 0.15s ease'
                     }}
-                    title="Eliminar esta conexión (Tecla Supr)"
+                    title="Eliminar esta conexiÃ³n (Tecla Supr)"
                   >
                     <Trash2 size={12} />
                     <span>Eliminar</span>
@@ -3218,7 +3767,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
                 <div style={{ width: '1px', height: '16px', background: 'rgba(245, 225, 206, 0.15)', margin: '0 2px' }} />
 
-                {/* Botón de Alternar Posición Arriba/Abajo */}
+                {/* BotÃ³n de Alternar PosiciÃ³n Arriba/Abajo */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -3239,7 +3788,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   <ArrowUpDown size={13} />
                 </button>
 
-                {/* Botón Minimizar */}
+                {/* BotÃ³n Minimizar */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -3255,12 +3804,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                     display: 'flex',
                     alignItems: 'center'
                   }}
-                  title="Minimizar barra a píldora compacta"
+                  title="Minimizar barra a pÃ­ldora compacta"
                 >
                   <ChevronUp size={13} />
                 </button>
 
-                {/* Botón Cerrar selección */}
+                {/* BotÃ³n Cerrar selecciÃ³n */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -3277,14 +3826,14 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                     alignItems: 'center',
                     borderRadius: '5px'
                   }}
-                  title="Deseleccionar conexión (Escape)"
+                  title="Deseleccionar conexiÃ³n (Escape)"
                 >
                   <X size={14} />
                 </button>
               </div>
             </div>
 
-            {/* Fila 2: Semántica UML, Multiplicidades y Presets en 1 clic */}
+            {/* Fila 2: SemÃ¡ntica UML, Multiplicidades y Presets en 1 clic */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -3292,7 +3841,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               borderTop: '1px solid rgba(245, 225, 206, 0.1)',
               paddingTop: '8px'
             }}>
-              {/* Selector de Tipo de Relación */}
+              {/* Selector de Tipo de RelaciÃ³n */}
               {canEdit && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                   <span style={{ fontSize: '0.68rem', color: '#e8c39e', fontWeight: 700, textTransform: 'uppercase' }}>
@@ -3320,15 +3869,15 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                     <option value="ASSOCIATION_1_1">1:1 (Uno a Uno)</option>
                     <option value="ASSOCIATION_N_M">N:M (Muchos a Muchos)</option>
                     <option value="ASSOCIATION_BINARY">Binaria Simple</option>
-                    <option value="ASSOCIATION_CLASS">Clase Asociativa (╌)</option>
-                    <option value="COMPOSITION">Composición (◆ Todo-Parte)</option>
-                    <option value="AGGREGATION">Agregación (◇ Agregado)</option>
-                    <option value="INHERITANCE">Herencia (△ Extiende)</option>
-                    <option value="REALIZATION">Realización (╌△ Implementa)</option>
-                    <option value="DEPENDENCY">Dependencia (╌&gt; Usa)</option>
-                    <option value="USAGE">«use» (Uso)</option>
-                    <option value="PACKAGE_IMPORT">«import»</option>
-                    <option value="NON_NAVIGABLE">No Navegable (✕)</option>
+                    <option value="ASSOCIATION_CLASS">Clase Asociativa (â•Œ)</option>
+                    <option value="COMPOSITION">ComposiciÃ³n (â—† Todo-Parte)</option>
+                    <option value="AGGREGATION">AgregaciÃ³n (â—‡ Agregado)</option>
+                    <option value="INHERITANCE">Herencia (â–³ Extiende)</option>
+                    <option value="REALIZATION">RealizaciÃ³n (â•Œâ–³ Implementa)</option>
+                    <option value="DEPENDENCY">Dependencia (â•Œ&gt; Usa)</option>
+                    <option value="USAGE">Â«useÂ» (Uso)</option>
+                    <option value="PACKAGE_IMPORT">Â«importÂ»</option>
+                    <option value="NON_NAVIGABLE">No Navegable (âœ•)</option>
                   </select>
                 </div>
               )}
@@ -3366,7 +3915,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                       <option value="1..*">1..*</option>
                     </select>
 
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>➔</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>âž”</span>
 
                     <select
                       value={rel.targetMultiplicity || '*'}
@@ -3397,7 +3946,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
                   <div style={{ width: '1px', height: '18px', background: 'rgba(245, 225, 206, 0.12)', flexShrink: 0 }} />
 
-                  {/* Presets Rápidos de Cardinalidad en 1 clic */}
+                  {/* Presets RÃ¡pidos de Cardinalidad en 1 clic */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                     <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontWeight: 600, marginRight: '2px' }}>
                       Presets:
@@ -3444,7 +3993,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   {/* Selector de Clase Asociativa Vinculada (UML 2.5) */}
                   <div style={{ width: '1px', height: '18px', background: 'rgba(245, 225, 206, 0.12)', flexShrink: 0 }} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.66rem', color: '#e8c39e', fontWeight: 700 }} title="Vincular con una Clase Asociativa (Línea discontinua UML 2.5)">
+                    <span style={{ fontSize: '0.66rem', color: '#e8c39e', fontWeight: 700 }} title="Vincular con una Clase Asociativa (LÃ­nea discontinua UML 2.5)">
                       Clase Asoc:
                     </span>
                     <select
@@ -3470,7 +4019,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                         .filter(c => c.id !== rel.sourceClassId && c.id !== rel.targetClassId)
                         .map(c => (
                           <option key={c.id} value={c.id}>
-                            {c.name} {c.stereotype === 'AssociationClass' ? '«Assoc»' : ''}
+                            {c.name} {c.stereotype === 'AssociationClass' ? 'Â«AssocÂ»' : ''}
                           </option>
                         ))}
                     </select>
@@ -3507,7 +4056,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           }}
         >
           <Lock size={15} />
-          <span>Modo Solo Lectura (Rol: {userRole || 'Observador'}) · Edición y arrastre de tablas restringidos</span>
+          <span>Modo Solo Lectura (Rol: {userRole || 'Observador'}) Â· EdiciÃ³n y arrastre de tablas restringidos</span>
         </div>
       )}
 
@@ -3533,10 +4082,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             key={cls.id}
             cls={cls}
             diagram={diagram}
-            isSelected={selectedClassId === cls.id}
+            isSelected={selectedClassIds.has(cls.id) || selectedClassId === cls.id}
             isConnectingSource={connectingSourceId === cls.id}
             isConnectingTarget={Boolean(connectingSourceId && connectingSourceId !== cls.id)}
-            isDragging={draggingClassId === cls.id}
+            isDragging={draggingClassId === cls.id || Boolean(draggingClassId && selectedClassIds.has(draggingClassId) && selectedClassIds.has(cls.id))}
             isRemoteDragging={Boolean(remoteDraggingNodes?.[cls.id] && draggingClassId !== cls.id)}
             remoteDragInfo={remoteDraggingNodes?.[cls.id]}
             canEdit={!userPermissions || userPermissions.canEditDiagram}
@@ -3595,7 +4144,32 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           />
         ))}
 
-        {/* ðŸ‘¥ Remote Collaborators Cursors Layer (Diagram World Space - CU-03) */}
+        {/* Halo de Enfoque Activo (Spotlight Quick Search) */}
+        {focusedClassPulseId && (() => {
+          const focusedCls = displayedClasses.find(c => c.id === focusedClassPulseId);
+          if (!focusedCls) return null;
+          const pos = focusedCls.position || { x: 100, y: 100 };
+          const dims = nodeDimensionsRef.current.get(focusedClassPulseId) || { w: 330, h: 220 };
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                left: `${pos.x - 10}px`,
+                top: `${pos.y - 10}px`,
+                width: `${dims.w + 20}px`,
+                height: `${dims.h + 20}px`,
+                borderRadius: '14px',
+                border: '2px solid #38bdf8',
+                boxShadow: '0 0 40px rgba(56, 189, 248, 0.8), inset 0 0 20px rgba(56, 189, 248, 0.3)',
+                pointerEvents: 'none',
+                zIndex: 35,
+                animation: 'pulse 0.9s ease-in-out infinite'
+              }}
+            />
+          );
+        })()}
+
+        {/* Ã°Å¸â€˜Â¥ Remote Collaborators Cursors Layer (Diagram World Space - CU-03) */}
         {!session.isLocalMode && activeRemoteCursors.map(c => (
           <div
             key={c.id}
@@ -3724,7 +4298,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             overflowX: 'auto'
           }}
         >
-          {/* Botón de Acceso Directo a Toolbox UML 2.5+ */}
+          {/* BotÃ³n de Acceso Directo a Toolbox UML 2.5+ */}
           <button
             onClick={() => setIsToolboxOpen(prev => !prev)}
             className="btn-studio-glass dock-btn"
@@ -3760,7 +4334,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               fontWeight: 700,
               whiteSpace: 'nowrap'
             }}
-            title="Crear nueva tabla/clase con asistente de campos y enlace rápido"
+            title="Crear nueva tabla/clase con asistente de campos y enlace rÃ¡pido"
           >
             <Plus size={14} />
             <span className="dock-btn-label">Nueva Tabla</span>
@@ -3824,7 +4398,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               fontWeight: 700,
               whiteSpace: 'nowrap'
             }}
-            title="Activar modo de conexión visual entre clases del lienzo"
+            title="Activar modo de conexiÃ³n visual entre clases del lienzo"
           >
             <Link2 size={14} color="#e8c39e" />
             <span className="dock-btn-label">Conectar</span>
@@ -3846,7 +4420,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               fontWeight: 700,
               whiteSpace: 'nowrap'
             }}
-            title="Auto-organizar clases en columnas arquitectónicas limpias"
+            title="Auto-organizar clases en columnas arquitectÃ³nicas limpias"
           >
             <LayoutGrid size={14} />
             <span className="dock-btn-label">Auto-Organizar</span>
@@ -3979,7 +4553,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             <span className="dock-btn-label">Ajustar</span>
           </button>
 
-          {/* Selector de Modo de Rueda del Ratón: Zoom vs Desplazamiento (Alt + M) */}
+          {/* Selector de Modo de Rueda del RatÃ³n: Zoom vs Desplazamiento (Alt + M) */}
           <button
             onClick={() => setWheelZoomMode(m => m === 'zoom' ? 'pan' : 'zoom')}
             className="dock-icon-btn"
@@ -4006,6 +4580,36 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             <Mouse size={13} />
             <span className="dock-btn-label">
               {wheelZoomMode === 'zoom' ? 'Rueda: Zoom' : 'Rueda: Scroll'}
+            </span>
+          </button>
+
+          {/* Selector de Herramienta: Modo Selección (Marquee) vs Modo Mano (Pan) */}
+          <button
+            onClick={() => setCanvasTool(t => t === 'select' ? 'pan' : 'select')}
+            className="dock-icon-btn"
+            style={{
+              background: canvasTool === 'select' ? 'rgba(56, 189, 248, 0.16)' : 'rgba(255, 255, 255, 0.06)',
+              border: `1px solid ${canvasTool === 'select' ? 'rgba(56, 189, 248, 0.42)' : 'rgba(255, 255, 255, 0.14)'}`,
+              color: canvasTool === 'select' ? '#38bdf8' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '0.72rem',
+              fontWeight: 600,
+              transition: 'all 0.15s ease'
+            }}
+            title={
+              canvasTool === 'select'
+                ? 'Herramienta SELECCIÓN MÚLTIPLE activa (arrastra en el lienzo para encerrar clases). Usa Shift+Arrastrar en cualquier momento.'
+                : 'Herramienta MANO / PAN activa (arrastra en el lienzo para mover la vista). Usa Shift+Arrastrar para seleccionar por recuadro.'
+            }
+          >
+            <Crosshair size={13} />
+            <span className="dock-btn-label">
+              {canvasTool === 'select' ? 'Herramienta: Selección' : 'Herramienta: Pan'}
             </span>
           </button>
 
@@ -4078,7 +4682,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           {/* Divisor */}
           <div className="dock-divider" style={{ width: '1px', height: '18px', background: 'var(--glass-topbar-border)', margin: '0 2px' }} />
 
-          {/* Botón Minimizar Dock */}
+          {/* BotÃ³n Minimizar Dock */}
           <button
             onClick={() => setIsDockCollapsed(true)}
             className="dock-icon-btn"
@@ -4100,13 +4704,179 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       )}
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* Modal Asistido: Crear Nueva Tabla / Clase UML               */}
+      {/* Barra Flotante de Acciones en Selección Múltiple (Paso 4)    */}
       {/* ───────────────────────────────────────────────────────────── */}
+      {selectedClassIds.size > 1 && (
+        <div
+          className="glass-dock"
+          style={{
+            position: 'absolute',
+            bottom: isDockCollapsed ? '48px' : '76px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 85,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '7px 14px',
+            background: 'rgba(10, 15, 35, 0.90)',
+            backdropFilter: 'blur(16px)',
+            border: '1px solid rgba(56, 189, 248, 0.45)',
+            borderRadius: '24px',
+            boxShadow: '0 10px 35px rgba(0, 0, 0, 0.45), 0 0 16px rgba(56, 189, 248, 0.25)',
+            color: '#f8fafc',
+            fontSize: '0.76rem',
+            userSelect: 'none'
+          }}
+        >
+          <span style={{ color: '#38bdf8', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <CheckCircle2 size={14} color="#38bdf8" />
+            <span>{selectedClassIds.size} clases seleccionadas</span>
+          </span>
+
+          <div style={{ width: '1px', height: '16px', background: 'rgba(255, 255, 255, 0.2)', margin: '0 2px' }} />
+
+          {/* Alinear Superior */}
+          <button
+            onClick={handleAlignTop}
+            className="dock-icon-btn"
+            style={{
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: 'var(--text-primary)',
+              borderRadius: '6px',
+              padding: '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              fontSize: '0.72rem',
+              fontWeight: 600
+            }}
+            title="Alinear horizontalmente al borde superior (misma Y)"
+          >
+            <span>Alinear ⬆</span>
+          </button>
+
+          {/* Alinear Izquierda */}
+          <button
+            onClick={handleAlignLeft}
+            className="dock-icon-btn"
+            style={{
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: 'var(--text-primary)',
+              borderRadius: '6px',
+              padding: '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              fontSize: '0.72rem',
+              fontWeight: 600
+            }}
+            title="Alinear verticalmente al borde izquierdo (misma X)"
+          >
+            <span>Alinear ⬅</span>
+          </button>
+
+          {/* Distribuir Horizontal */}
+          <button
+            onClick={handleDistributeHorizontal}
+            className="dock-icon-btn"
+            style={{
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: 'var(--text-primary)',
+              borderRadius: '6px',
+              padding: '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              fontSize: '0.72rem',
+              fontWeight: 600
+            }}
+            title="Distribuir espaciado horizontal equitativo"
+          >
+            <span>Distribuir ↔</span>
+          </button>
+
+          {/* Duplicar Selección */}
+          <button
+            onClick={handleDuplicateSelected}
+            className="dock-icon-btn"
+            style={{
+              background: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              color: '#38bdf8',
+              borderRadius: '6px',
+              padding: '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              fontSize: '0.72rem',
+              fontWeight: 600
+            }}
+            title="Duplicar todas las clases seleccionadas con sus atributos y métodos"
+          >
+            <span>Duplicar</span>
+          </button>
+
+          {/* Eliminar Selección */}
+          <button
+            onClick={handleDeleteSelected}
+            className="dock-icon-btn"
+            style={{
+              background: 'rgba(244, 63, 94, 0.14)',
+              border: '1px solid rgba(244, 63, 94, 0.35)',
+              color: '#fb7185',
+              borderRadius: '6px',
+              padding: '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              fontSize: '0.72rem',
+              fontWeight: 600
+            }}
+            title="Eliminar todas las clases seleccionadas (Del)"
+          >
+            <Trash2 size={13} color="#fb7185" />
+            <span>Eliminar</span>
+          </button>
+
+          {/* Deseleccionar */}
+          <button
+            onClick={() => {
+              setSelectedClassIds(new Set());
+              onSelectClass(null);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              padding: '2px 4px',
+              display: 'flex',
+              alignItems: 'center'
+            }}
+            title="Deseleccionar (Esc)"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* Modal Asistido: Crear Nueva Tabla / Clase UML               */}
+      {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {showNewClassModal && (
         <GlassModal
           onClose={() => setShowNewClassModal(false)}
           title="Nueva Tabla / Clase UML"
-          subtitle="Asistente de modelado rápido con campos y enlaces automáticos"
+          subtitle="Asistente de modelado rÃ¡pido con campos y enlaces automÃ¡ticos"
           icon={<Plus size={18} color="#e8c39e" />}
           maxWidth="540px"
           zIndex={1250}
@@ -4162,7 +4932,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 }}
               />
 
-              {/* Chips Rápidos de Nombres de Dominio */}
+              {/* Chips RÃ¡pidos de Nombres de Dominio */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '2px' }}>
                 <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', alignSelf: 'center', marginRight: '4px' }}>Sugerencias:</span>
                 {['Cliente', 'Producto', 'Pedido', 'Factura', 'Usuario', 'Rol', 'Categoria', 'Proveedor', 'Pago', 'Empleado'].map(sug => (
@@ -4187,10 +4957,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               </div>
             </div>
 
-            {/* Estereotipo Arquitectónico */}
+            {/* Estereotipo ArquitectÃ³nico */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                Capa Arquitectónica (Estereotipo):
+                Capa ArquitectÃ³nica (Estereotipo):
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
                 {[
@@ -4324,14 +5094,14 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                       <option value="ASSOCIATION_N_M">N:M (Muchos a Muchos)</option>
                       <option value="ASSOCIATION_1_1">1:1 (Uno a Uno)</option>
                       <option value="ASSOCIATION_BINARY">Binaria</option>
-                      <option value="COMPOSITION">Composición</option>
-                      <option value="AGGREGATION">Agregación</option>
+                      <option value="COMPOSITION">ComposiciÃ³n</option>
+                      <option value="AGGREGATION">AgregaciÃ³n</option>
                       <option value="INHERITANCE">Herencia</option>
-                      <option value="REALIZATION">Realización</option>
+                      <option value="REALIZATION">RealizaciÃ³n</option>
                       <option value="DEPENDENCY">Dependencia</option>
-                      <option value="USAGE">«use»</option>
-                      <option value="PACKAGE_IMPORT">«import»</option>
-                      <option value="NON_NAVIGABLE">No Navegable ✕</option>
+                      <option value="USAGE">Â«useÂ»</option>
+                      <option value="PACKAGE_IMPORT">Â«importÂ»</option>
+                      <option value="NON_NAVIGABLE">No Navegable âœ•</option>
                     </select>
                   )}
                 </div>
@@ -4341,9 +5111,9 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         </GlassModal>
       )}
 
-      {/* ───────────────────────────────────────────────────────────── */}
+      {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {/* Modal: Plantillas de Negocio / Arquitecturas en 1 Clic     */}
-      {/* ───────────────────────────────────────────────────────────── */}
+      {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {showTemplatesModal && (
         <GlassModal
           onClose={() => setShowTemplatesModal(false)}
@@ -4387,7 +5157,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                           {plantilla.nombre}
                         </div>
                         <div style={{ fontSize: '0.68rem', color: plantilla.color, fontWeight: 700 }}>
-                          {plantilla.categoria} · {plantilla.classesCount} Tablas · {plantilla.relationsCount} Relaciones
+                          {plantilla.categoria} Â· {plantilla.classesCount} Tablas Â· {plantilla.relationsCount} Relaciones
                         </div>
                       </div>
                     </div>
@@ -4404,10 +5174,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                           alignItems: 'center',
                           gap: '4px'
                         }}
-                        title="Añadir estas tablas conservando lo que ya tienes"
+                        title="AÃ±adir estas tablas conservando lo que ya tienes"
                       >
                         <Plus size={13} />
-                        <span>Añadir al Lienzo</span>
+                        <span>AÃ±adir al Lienzo</span>
                       </button>
 
                       <button
@@ -4453,7 +5223,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         </GlassModal>
       )}
 
-      {/* Modal Interactivo de Descomposición Manual N:M en Tabla Intermedia (UML 2.5 / 3FN) */}
+      {/* Modal Interactivo de DescomposiciÃ³n Manual N:M en Tabla Intermedia (UML 2.5 / 3FN) */}
       {decomposerModalData && (
         <IntermediateTableDecomposerModal
           sourceClass={decomposerModalData.srcClass}
@@ -4464,7 +5234,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         />
       )}
 
-      {/* Modal Interactivo de Extracción de Superclase / Herencia Generalizada (UML 2.5) */}
+      {/* Modal Interactivo de ExtracciÃ³n de Superclase / Herencia Generalizada (UML 2.5) */}
       {extractSuperclassClasses && (
         <ExtractSuperclassModal
           selectedClasses={extractSuperclassClasses}

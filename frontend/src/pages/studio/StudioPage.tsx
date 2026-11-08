@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { InformacionSesion, PerfilUsuario, RolUsuario } from '../../types/auth';
 import { ModeloDiagrama, ClaseUml, RelacionUml, AtributoUml, MetodoUml } from '../../types/uml';
 import { LeftNavRail as BarraLateralNavegacion } from '../../components/layout/LeftNavRail';
@@ -6,12 +6,33 @@ import { TopHeader as BarraSuperior } from '../../components/layout/TopHeader';
 import { ProjectStructureFlyout as PanelEstructuraProyecto } from '../../components/canvas/ProjectStructureFlyout';
 import { InteractiveStudioCanvas as LienzoInteractivoStudio } from '../../components/canvas/InteractiveStudioCanvas';
 import { FloatingAiAssistant as AsistenteIaFlotante } from '../../components/voice/FloatingAiAssistant';
-import { CodeGenerationDock as PanelGeneracionCodigo } from '../../components/dock/CodeGenerationDock';
-import { WhiteboardScannerModal as ModalEscanerPizarra } from '../../components/canvas/WhiteboardScannerModal';
 import { CollaborationPanel as PanelColaboracion } from '../../components/collaboration/CollaborationPanel';
-import { ModalGestionEquipo } from '../../components/equipo/ModalGestionEquipo';
-import { ModalAtajosTeclado } from '../../components/canvas/ModalAtajosTeclado';
 import { RolEquipo, PermisosUsuario, MiembroEquipo, obtenerPermisosRol } from '../../types/rbac';
+
+// Carga diferida (Code Splitting) de paneles y modales secundarios
+const PanelGeneracionCodigo = lazy(() =>
+  import('../../components/dock/CodeGenerationDock').then(m => ({ default: m.CodeGenerationDock }))
+);
+const ModalEscanerPizarra = lazy(() =>
+  import('../../components/canvas/WhiteboardScannerModal').then(m => ({ default: m.WhiteboardScannerModal }))
+);
+const ModalGestionEquipo = lazy(() =>
+  import('../../components/equipo/ModalGestionEquipo').then(m => ({ default: m.ModalGestionEquipo }))
+);
+const ModalAtajosTeclado = lazy(() =>
+  import('../../components/canvas/ModalAtajosTeclado').then(m => ({ default: m.ModalAtajosTeclado }))
+);
+const ModalExportarVisual = lazy(() =>
+  import('../../components/canvas/ModalExportarVisual').then(m => ({ default: m.ModalExportarVisual }))
+);
+const QuickSearchSpotlightModal = lazy(() =>
+  import('../../components/canvas/QuickSearchSpotlightModal').then(m => ({ default: m.QuickSearchSpotlightModal }))
+);
+import {
+  exportProjectAsArchAi,
+  openProjectFileDialog,
+  readAndImportProjectFile
+} from '../../services/nativeProjectService';
 import { calcularMadurezProyecto } from '../../services/softwareMaturity';
 import { generarMetodosSugeridos } from '../../services/projectBrainService';
 import { ClienteStomp } from '../../services/stompClient';
@@ -36,17 +57,22 @@ import {
   sincronizarColaOffline,
   obtenerColaOffline
 } from '../../services/api';
+import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { Share2, Copy, Check, X, Save, History, UserCircle, CloudOff, RotateCcw, Upload, Settings2, RefreshCw, Users, UserCheck, Sun, Moon, Zap, Radio, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { GlassModal } from '../../components/glass/GlassModal';
 
-interface PaginaEstudioCanvasProps {
-  session: InformacionSesion;
-  onLogout: () => void;
+export interface StudioPageProps {
+  session?: InformacionSesion;
+  onLogout?: () => void;
   initialDiagram?: ModeloDiagrama;
   onOpenProjects?: () => void;
   projectTitle?: string;
   diagramId?: string;
+  initialTab?: 'canvas' | 'team' | 'settings';
+  initialDock?: 'code' | 'ai' | null;
 }
+
+export type PaginaEstudioCanvasProps = StudioPageProps;
 
 const DIAGRAMA_INICIAL_DEFECTO: ModeloDiagrama = {
   title: 'Sistema de Comercio Electrónico v1.2',
@@ -143,15 +169,103 @@ const DIAGRAMA_INICIAL_DEFECTO: ModeloDiagrama = {
   ]
 };
 
-export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
-  session,
-  onLogout,
-  initialDiagram,
-  onOpenProjects,
-  projectTitle,
-  diagramId
+export const StudioPage: React.FC<StudioPageProps> = ({
+  session: propSession,
+  onLogout: propOnLogout,
+  initialDiagram: propInitialDiagram,
+  onOpenProjects: propOnOpenProjects,
+  projectTitle: propProjectTitle,
+  diagramId: propDiagramId,
+  initialTab,
+  initialDock
 }) => {
-  const [currentSession, setCurrentSession] = useState<InformacionSesion>(session);
+  const navigate = useNavigate();
+  const params = useParams<{ diagramId?: string; roomId?: string }>();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+
+  const diagramId = propDiagramId || params.diagramId || searchParams.get('diagramId') || (location.state as any)?.diagramId || localStorage.getItem('archai_selected_diagram_id') || undefined;
+  const projectTitle = propProjectTitle || searchParams.get('title') || (location.state as any)?.projectTitle || localStorage.getItem('archai_selected_project_title') || undefined;
+  const initialDiagram = propInitialDiagram || (location.state as any)?.diagram;
+  const urlRoomId = params.roomId || searchParams.get('roomId') || undefined;
+
+  const [currentSession, setCurrentSession] = useState<InformacionSesion>(() => {
+    if (propSession) {
+      if (urlRoomId && propSession.roomId !== urlRoomId) {
+        return { ...propSession, roomId: urlRoomId, roomName: `Sala ${urlRoomId}` };
+      }
+      return propSession;
+    }
+    const guardado = localStorage.getItem('archai_session');
+    if (guardado) {
+      try {
+        const parsed = JSON.parse(guardado);
+        if (parsed?.currentUser) {
+          if (urlRoomId && parsed.roomId !== urlRoomId) {
+            return { ...parsed, roomId: urlRoomId, roomName: `Sala ${urlRoomId}` };
+          }
+          return parsed;
+        }
+      } catch {}
+    }
+    return {
+      roomId: urlRoomId || 'ARC-GRUPO04',
+      roomName: urlRoomId ? `Sala ${urlRoomId}` : 'Sala General',
+      hostName: 'Arquitecto',
+      createdAt: new Date().toISOString(),
+      currentUser: {
+        id: 'usr-default',
+        name: 'Arquitecto ArchAI',
+        email: 'arquitecto@archai.io',
+        role: 'ARQUITECTO' as any,
+        isHost: true
+      },
+      participants: []
+    };
+  });
+
+  useEffect(() => {
+    if (propSession) {
+      if (urlRoomId && propSession.roomId !== urlRoomId) {
+        setCurrentSession({ ...propSession, roomId: urlRoomId, roomName: `Sala ${urlRoomId}` });
+      } else {
+        setCurrentSession(propSession);
+      }
+    } else {
+      const guardado = localStorage.getItem('archai_session');
+      if (!guardado) {
+        navigate('/login', { replace: true });
+      } else if (urlRoomId) {
+        try {
+          const parsed = JSON.parse(guardado);
+          if (parsed && parsed.roomId !== urlRoomId) {
+            setCurrentSession(prev => ({ ...prev, roomId: urlRoomId, roomName: `Sala ${urlRoomId}` }));
+          }
+        } catch {}
+      }
+    }
+  }, [propSession, urlRoomId, navigate]);
+
+  const onLogout = () => {
+    if (propOnLogout) {
+      propOnLogout();
+    } else {
+      localStorage.removeItem('archai_session');
+      localStorage.removeItem('archai_token');
+      localStorage.removeItem('archai_current_view');
+      localStorage.removeItem('archai_selected_diagram_id');
+      localStorage.removeItem('archai_selected_project_title');
+      localStorage.removeItem('archai_selected_diagram');
+    }
+    navigate('/login');
+  };
+
+  const onOpenProjects = () => {
+    if (propOnOpenProjects) {
+      propOnOpenProjects();
+    }
+    navigate('/projects');
+  };
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('archai_theme');
     return saved === 'dark' ? 'dark' : 'light';
@@ -186,13 +300,28 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
     return DIAGRAMA_INICIAL_DEFECTO;
   });
   const [selectedClassId, setSelectedClassId] = useState<string | null>('cls-service');
-  const [activeRailTab, setActiveRailTab] = useState<'canvas' | 'team' | 'settings'>('canvas');
-  const [isCodeDockOpen, setIsCodeDockOpen] = useState<boolean>(false);
-  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState<boolean>(false);
+  const [activeRailTab, setActiveRailTab] = useState<'canvas' | 'team' | 'settings'>(() => {
+    if (initialTab) return initialTab;
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'team' || tabParam === 'settings' || tabParam === 'canvas') return tabParam;
+    return 'canvas';
+  });
+  const [isCodeDockOpen, setIsCodeDockOpen] = useState<boolean>(() => {
+    if (initialDock === 'code') return true;
+    return searchParams.get('dock') === 'code';
+  });
+  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState<boolean>(() => {
+    if (initialDock === 'ai') return true;
+    return searchParams.get('dock') === 'ai';
+  });
   const [showWhiteboardModal, setShowWhiteboardModal] = useState<boolean>(false);
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [shareCopied, setShareCopied] = useState<boolean>(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
+  const [showExportarVisualModal, setShowExportarVisualModal] = useState<boolean>(false);
+  const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
+  const [isQuickSearchOpen, setIsQuickSearchOpen] = useState<boolean>(false);
+  const [focusTarget, setFocusTarget] = useState<{ classId: string; tick: number } | null>(null);
   const clipboardClassRef = useRef<ClaseUml | null>(null);
 
   // Pilas de Historial para Deshacer (Undo) y Rehacer (Redo)
@@ -795,6 +924,75 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
     });
   };
 
+  /** Exportar proyecto completo como archivo nativo portable .archai.json */
+  const handleExportarArchivo = () => {
+    try {
+      exportProjectAsArchAi(diagram, diagram.title, currentSession?.currentUser?.name);
+      setSaveInfo({
+        tipo: 'ok',
+        texto: `Proyecto '${diagram.title}' exportado en formato nativo .archai.json.`
+      });
+    } catch (err: any) {
+      setSaveInfo({
+        tipo: 'error',
+        texto: `Error al exportar archivo: ${err.message || 'Error inesperado'}`
+      });
+    }
+  };
+
+  /** Importar proyecto desde archivo nativo .archai.json o .json */
+  const handleImportarArchivo = async () => {
+    try {
+      const file = await openProjectFileDialog();
+      if (!file) return;
+
+      const importedDiagram = await readAndImportProjectFile(file);
+      handleUpdateDiagram(importedDiagram);
+      setSaveInfo({
+        tipo: 'ok',
+        texto: `Proyecto '${importedDiagram.title}' importado (${importedDiagram.classes.length} clases, ${importedDiagram.relations.length} relaciones).`
+      });
+    } catch (err: any) {
+      setSaveInfo({
+        tipo: 'error',
+        texto: `Error al importar archivo: ${err.message || 'Formato no compatible'}`
+      });
+    }
+  };
+
+  /** Manejar archivo arrastrado directamente al lienzo (Drag and Drop) */
+  const handleDropFile = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    if (!file.name.endsWith('.json') && !file.name.endsWith('.archai')) {
+      setSaveInfo({
+        tipo: 'error',
+        texto: 'Por favor arrastra un archivo con extensión .archai.json o .json'
+      });
+      return;
+    }
+
+    try {
+      const importedDiagram = await readAndImportProjectFile(file);
+      handleUpdateDiagram(importedDiagram);
+      setSaveInfo({
+        tipo: 'ok',
+        texto: `Proyecto '${importedDiagram.title}' cargado desde '${file.name}' (${importedDiagram.classes.length} clases).`
+      });
+    } catch (err: any) {
+      setSaveInfo({
+        tipo: 'error',
+        texto: `Error al importar archivo arrastrado: ${err.message || 'Formato inválido'}`
+      });
+    }
+  };
+
   const handleAddClass = (newClass: ClaseUml) => {
     handleUpdateDiagram(prev => ({
       ...prev,
@@ -946,7 +1144,8 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
 
   const handleCopySharePin = () => {
     if (currentSession?.roomId) {
-      navigator.clipboard.writeText(currentSession.roomId);
+      const shareUrl = `${window.location.origin}/sala/${encodeURIComponent(currentSession.roomId)}`;
+      navigator.clipboard.writeText(shareUrl);
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2000);
     }
@@ -973,6 +1172,28 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
     setShowShareModal(false);
     setPinCambioSala('');
     setSaveInfo({ tipo: 'ok', texto: `Conectado a la sala ${pinLimpio}. Sincronizando diagrama…` });
+
+    const newParams = new URLSearchParams(location.search);
+    newParams.set('roomId', pinLimpio);
+    navigate({
+      pathname: location.pathname,
+      search: `?${newParams.toString()}`
+    }, { replace: true });
+  };
+
+  const handleSelectRailTab = (tab: 'canvas' | 'team' | 'settings') => {
+    setActiveRailTab(tab);
+    const newParams = new URLSearchParams(location.search);
+    if (tab === 'canvas') {
+      newParams.delete('tab');
+    } else {
+      newParams.set('tab', tab);
+    }
+    const q = newParams.toString();
+    navigate({
+      pathname: location.pathname,
+      search: q ? `?${q}` : ''
+    }, { replace: true });
   };
 
   // ───────────────────────── CU-01 · Perfil · CU-05 · Nube/Versiones · CU-09 · Offline ─────────────────────────
@@ -1203,6 +1424,13 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
         return;
       }
 
+      // Búsqueda rápida Spotlight con Ctrl+K
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsQuickSearchOpen(prev => !prev);
+        return;
+      }
+
       // Ayuda de atajos con F1 o ?
       if (e.key === 'F1' || e.key === '?') {
         e.preventDefault();
@@ -1300,7 +1528,7 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
       {/* 1. Barra Lateral de Navegación */}
       <BarraLateralNavegacion
         activeTab={activeRailTab}
-        onSelectTab={setActiveRailTab}
+        onSelectTab={handleSelectRailTab}
         currentUser={currentSession.currentUser}
         onLogout={onLogout}
         onOpenProjects={onOpenProjects}
@@ -1324,6 +1552,10 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
           onOpenProjects={onOpenProjects}
           onExportXmi={handleExportXmi}
           onExportarEA={handleExportarEA}
+          onExportarVisual={() => setShowExportarVisualModal(true)}
+          onExportarArchivo={handleExportarArchivo}
+          onImportarArchivo={handleImportarArchivo}
+          onOpenQuickSearch={() => setIsQuickSearchOpen(true)}
           onToggleCodeDock={() => setIsCodeDockOpen(prev => !prev)}
           isCodeDockOpen={isCodeDockOpen}
           onShare={() => setShowShareModal(true)}
@@ -1346,13 +1578,68 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
         />
 
         {/* Espacio de Trabajo Central (Lienzo + Paneles Flotantes + Dock) */}
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          position: 'relative',
-          minHeight: 0,
-          overflow: 'hidden'
-        }}>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDraggingFile(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setIsDraggingFile(false);
+            }
+          }}
+          onDrop={handleDropFile}
+          style={{
+            flex: 1,
+            display: 'flex',
+            position: 'relative',
+            minHeight: 0,
+            overflow: 'hidden'
+          }}
+        >
+          {/* Overlay visual para Drag-and-Drop de archivos .archai.json */}
+          {isDraggingFile && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 9999,
+              background: 'rgba(7, 10, 28, 0.82)',
+              backdropFilter: 'blur(10px)',
+              border: '2px dashed #38bdf8',
+              borderRadius: '12px',
+              margin: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '14px',
+              color: '#38bdf8',
+              pointerEvents: 'none',
+              animation: 'fadeIn 0.2s ease-out'
+            }}>
+              <div style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                background: 'rgba(56, 189, 248, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(56, 189, 248, 0.4)'
+              }}>
+                <Upload size={32} color="#38bdf8" />
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#f8fafc', marginBottom: '4px' }}>
+                  Suelta tu proyecto ArchAI (.archai.json) aquí
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                  El diagrama y sus relaciones se cargarán instantáneamente en el lienzo
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Lienzo Interactivo UML (sólo visible en la vista "canvas") */}
           {activeRailTab === 'canvas' && (
             <>
@@ -1392,6 +1679,8 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
             onCopyClass={handleCopyClass}
             onPasteClass={handlePasteClass}
             onDuplicateClass={handleDuplicateClass}
+            focusTarget={focusTarget}
+            onOpenQuickSearch={() => setIsQuickSearchOpen(true)}
           />
 
           {/* 3. Panel Flotante de Estructura del Proyecto */}
@@ -1428,16 +1717,20 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
           )}
 
           {/* 6. Panel Lateral de Generación de Código y DDL */}
-          <PanelGeneracionCodigo
-            isOpen={isCodeDockOpen}
-            onClose={() => setIsCodeDockOpen(false)}
-            diagram={diagram}
-            onCustomCodeChange={setCustomCodeMap}
-            onImportarDiagrama={(d) => {
-              handleUpdateDiagram(d);
-              setSaveInfo({ tipo: 'ok', texto: 'Diagrama reconstruido desde XMI (CU-13).' });
-            }}
-          />
+          {isCodeDockOpen && (
+            <Suspense fallback={null}>
+              <PanelGeneracionCodigo
+                isOpen={isCodeDockOpen}
+                onClose={() => setIsCodeDockOpen(false)}
+                diagram={diagram}
+                onCustomCodeChange={setCustomCodeMap}
+                onImportarDiagrama={(d) => {
+                  handleUpdateDiagram(d);
+                  setSaveInfo({ tipo: 'ok', texto: 'Diagrama reconstruido desde XMI (CU-13).' });
+                }}
+              />
+            </Suspense>
+          )}
             </>
           )}
 
@@ -1539,21 +1832,27 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
 
       {/* Modal Escáner de Pizarra OCR */}
       {showWhiteboardModal && (
-        <ModalEscanerPizarra
-          onImportDiagram={handleWhiteboardImport}
-          onClose={() => setShowWhiteboardModal(false)}
-        />
+        <Suspense fallback={null}>
+          <ModalEscanerPizarra
+            onImportDiagram={handleWhiteboardImport}
+            onClose={() => setShowWhiteboardModal(false)}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Gestión de Equipo y Permisos RBAC */}
-      <ModalGestionEquipo
-        isOpen={isTeamModalOpen}
-        onClose={() => setIsTeamModalOpen(false)}
-        miembros={miembros}
-        onActualizarMiembro={handleActualizarMiembro}
-        onCambiarMiRol={handleRoleChange}
-        currentUserId={currentSession.currentUser.id}
-      />
+      {isTeamModalOpen && (
+        <Suspense fallback={null}>
+          <ModalGestionEquipo
+            isOpen={isTeamModalOpen}
+            onClose={() => setIsTeamModalOpen(false)}
+            miembros={miembros}
+            onActualizarMiembro={handleActualizarMiembro}
+            onCambiarMiRol={handleRoleChange}
+            currentUserId={currentSession.currentUser.id}
+          />
+        </Suspense>
+      )}
 
       {/* Modal de Compartir PIN */}
       {showShareModal && (
@@ -1819,7 +2118,47 @@ export const PaginaEstudioCanvas: React.FC<PaginaEstudioCanvasProps> = ({
 
       {/* Modal de Atajos de Teclado (F1 o ?) */}
       {showShortcutsModal && (
-        <ModalAtajosTeclado onClose={() => setShowShortcutsModal(false)} />
+        <Suspense fallback={null}>
+          <ModalAtajosTeclado onClose={() => setShowShortcutsModal(false)} />
+        </Suspense>
+      )}
+
+      {/* Modal de Exportación Visual (PNG / SVG) */}
+      {showExportarVisualModal && (
+        <Suspense fallback={null}>
+          <ModalExportarVisual
+            isOpen={showExportarVisualModal}
+            onClose={() => setShowExportarVisualModal(false)}
+            diagram={diagram}
+            onSuccess={(msg) => setSaveInfo({ tipo: 'ok', texto: msg })}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Spotlight de Búsqueda Rápida y Comandos (Ctrl + K) */}
+      {isQuickSearchOpen && (
+        <Suspense fallback={null}>
+          <QuickSearchSpotlightModal
+            isOpen={isQuickSearchOpen}
+            onClose={() => setIsQuickSearchOpen(false)}
+            diagram={diagram}
+            onFocusClass={(classId) => {
+              setFocusTarget({ classId, tick: Date.now() });
+              setIsQuickSearchOpen(false);
+            }}
+            onNewClass={() => setActiveRailTab('canvas')}
+            onAutoOrganize={() => setActiveRailTab('canvas')}
+            onExportVisual={() => setShowExportarVisualModal(true)}
+            onExportArchivo={handleExportarArchivo}
+            onExportEA={handleExportarEA}
+            onToggleTheme={handleToggleTheme}
+            onOpenShortcuts={() => setShowShortcutsModal(true)}
+            onToggleAiAssistant={() => setIsAiAssistantOpen(prev => !prev)}
+            onToggleCodeDock={() => setIsCodeDockOpen(prev => !prev)}
+            onOpenTeamModal={() => setIsTeamModalOpen(true)}
+            onOpenVersions={manejarAbrirVersiones}
+          />
+        </Suspense>
       )}
 
       {/* Toast informativo (CU-01 / CU-05 / CU-09) */}
@@ -2330,3 +2669,7 @@ const ModalPerfilUsuario: React.FC<ModalPerfilUsuarioProps> = ({ usuario, onGuar
     </GlassModal>
   );
 };
+
+// Alias de retrocompatibilidad
+export const PaginaEstudioCanvas = StudioPage;
+export default StudioPage;

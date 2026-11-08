@@ -4,6 +4,7 @@ interface GlassTextFieldProps extends React.InputHTMLAttributes<HTMLInputElement
   leadingIcon?: React.ReactNode;
   trailingIcon?: React.ReactNode;
   label?: string;
+  labelStyle?: React.CSSProperties;
   error?: string;
 }
 
@@ -11,6 +12,7 @@ export const GlassTextField: React.FC<GlassTextFieldProps> = ({
   leadingIcon,
   trailingIcon,
   label,
+  labelStyle,
   error,
   style,
   ...props
@@ -18,7 +20,16 @@ export const GlassTextField: React.FC<GlassTextFieldProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
       {label && (
-        <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+        <label
+          className="glass-textfield-label"
+          style={{
+            fontSize: '0.8rem',
+            fontWeight: 700,
+            color: 'var(--text-secondary)',
+            letterSpacing: '0.01em',
+            ...labelStyle
+          }}
+        >
           {label}
         </label>
       )}

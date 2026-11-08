@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "ArchAI Mobile",
+    "slug": "archai-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#000020"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.archai.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#000020"
+      },
+      "package": "com.archai.mobile",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#38bdf8"
+        }
+      ]
+    ]
+  }
+}

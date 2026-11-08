@@ -15,7 +15,11 @@ import {
   FileOutput,
   Undo2,
   Redo2,
-  Keyboard
+  Keyboard,
+  Image,
+  Upload,
+  FileJson,
+  Search
 } from 'lucide-react';
 import { InformacionSesion } from '../../types/auth';
 import { RolEquipo } from '../../types/rbac';
@@ -31,6 +35,14 @@ interface TopHeaderProps {
   onExportXmi: () => void;
   /** CU/EA · Exportar XMI 1.1 nativo de Sparx (con diagrama) para Enterprise Architect. */
   onExportarEA?: () => void;
+  /** Exportar imagen visual de alta resolución PNG / SVG */
+  onExportarVisual?: () => void;
+  /** Exportar archivo nativo portable (.archai.json) */
+  onExportarArchivo?: () => void;
+  /** Importar archivo nativo portable (.archai.json) */
+  onImportarArchivo?: () => void;
+  /** Abrir búsqueda rápida Spotlight (Ctrl + K) */
+  onOpenQuickSearch?: () => void;
   onToggleCodeDock: () => void;
   isCodeDockOpen: boolean;
   onShare: () => void;
@@ -71,6 +83,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenProjects,
   onExportXmi,
   onExportarEA,
+  onExportarVisual,
+  onExportarArchivo,
+  onImportarArchivo,
+  onOpenQuickSearch,
   onToggleCodeDock,
   isCodeDockOpen,
   onShare,
@@ -217,6 +233,41 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         >
           {projectTitle}
         </div>
+
+        {/* Acceso Rápido Spotlight (Ctrl + K) */}
+        {onOpenQuickSearch && (
+          <button
+            onClick={onOpenQuickSearch}
+            className="btn-studio-glass"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 9px',
+              fontSize: '0.74rem',
+              color: 'var(--text-secondary)',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--glass-border-color, rgba(255, 255, 255, 0.1))',
+              borderRadius: '7px',
+              cursor: 'pointer'
+            }}
+            title="Buscar clases, atributos, métodos o comandos (Ctrl + K)"
+          >
+            <Search size={13} color="var(--accent-cyan, #38bdf8)" />
+            <span style={{ color: 'var(--text-secondary)' }}>Buscar...</span>
+            <kbd style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              fontSize: '0.62rem',
+              fontFamily: 'var(--font-mono)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              color: 'var(--text-primary)'
+            }}>
+              Ctrl K
+            </kbd>
+          </button>
+        )}
 
         {/* Sala Colaborativa PIN Badge */}
         <button
@@ -556,6 +607,84 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 </button>
               )}
 
+              {/* Exportar Archivo .archai.json */}
+              {onExportarArchivo && (
+                <button
+                  onClick={() => {
+                    onExportarArchivo();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="btn-studio-glass"
+                  style={{
+                    justifyContent: 'flex-start',
+                    border: 'none',
+                    padding: '8px 12px',
+                    fontSize: '0.78rem',
+                    gap: '8px',
+                    textAlign: 'left'
+                  }}
+                  title="Exportar respaldo completo del proyecto en formato JSON nativo de ArchAI"
+                >
+                  <FileJson size={14} color="#38bdf8" />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Exportar Archivo (.archai.json)</span>
+                    <span style={{ fontSize: '0.66rem', color: '#38bdf8', fontWeight: 600 }}>Respaldo offline portable</span>
+                  </div>
+                </button>
+              )}
+
+              {/* Importar Archivo .archai.json */}
+              {onImportarArchivo && (
+                <button
+                  onClick={() => {
+                    onImportarArchivo();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="btn-studio-glass"
+                  style={{
+                    justifyContent: 'flex-start',
+                    border: 'none',
+                    padding: '8px 12px',
+                    fontSize: '0.78rem',
+                    gap: '8px',
+                    textAlign: 'left'
+                  }}
+                  title="Abrir o restaurar un proyecto desde archivo local (.archai.json)"
+                >
+                  <Upload size={14} color="#34d399" />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Importar Archivo (.archai.json)</span>
+                    <span style={{ fontSize: '0.66rem', color: '#34d399', fontWeight: 600 }}>Cargar modelo desde tu equipo</span>
+                  </div>
+                </button>
+              )}
+
+              {/* Exportar Imagen PNG / SVG (Alta Resolución) */}
+              {onExportarVisual && (
+                <button
+                  onClick={() => {
+                    onExportarVisual();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="btn-studio-glass"
+                  style={{
+                    justifyContent: 'flex-start',
+                    border: 'none',
+                    padding: '8px 12px',
+                    fontSize: '0.78rem',
+                    gap: '8px',
+                    textAlign: 'left'
+                  }}
+                  title="Descargar diagrama en alta definición PNG (2x/3x Retina) o formato vectorial SVG"
+                >
+                  <Image size={14} color="#e8c39e" />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Exportar Imagen (PNG / SVG)</span>
+                    <span style={{ fontSize: '0.66rem', color: '#e8c39e', fontWeight: 600 }}>Alta resolución Retina / Print (2x/3x)</span>
+                  </div>
+                </button>
+              )}
+
               {/* Versiones */}
               {onVersiones && (
                 <button
@@ -707,6 +836,58 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                     <span>Atajos de Teclado</span>
                     <kbd style={{ fontSize: '0.65rem', opacity: 0.7, background: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px', fontFamily: 'monospace' }}>F1 o ?</kbd>
+                  </div>
+                </button>
+              )}
+
+              {/* Exportar Archivo .archai.json */}
+              {onExportarArchivo && (
+                <button
+                  onClick={() => {
+                    onExportarArchivo();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="btn-studio-glass"
+                  style={{
+                    justifyContent: 'flex-start',
+                    border: 'none',
+                    padding: '8px 12px',
+                    fontSize: '0.78rem',
+                    gap: '8px',
+                    textAlign: 'left'
+                  }}
+                  title="Exportar respaldo completo del proyecto en formato JSON nativo de ArchAI"
+                >
+                  <FileJson size={14} color="#38bdf8" />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Exportar Archivo (.archai.json)</span>
+                    <span style={{ fontSize: '0.66rem', color: '#38bdf8', fontWeight: 600 }}>Respaldo offline portable</span>
+                  </div>
+                </button>
+              )}
+
+              {/* Importar Archivo .archai.json */}
+              {onImportarArchivo && (
+                <button
+                  onClick={() => {
+                    onImportarArchivo();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="btn-studio-glass"
+                  style={{
+                    justifyContent: 'flex-start',
+                    border: 'none',
+                    padding: '8px 12px',
+                    fontSize: '0.78rem',
+                    gap: '8px',
+                    textAlign: 'left'
+                  }}
+                  title="Abrir o restaurar un proyecto desde archivo local (.archai.json)"
+                >
+                  <Upload size={14} color="#34d399" />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Importar Archivo (.archai.json)</span>
+                    <span style={{ fontSize: '0.66rem', color: '#34d399', fontWeight: 600 }}>Cargar modelo desde tu equipo</span>
                   </div>
                 </button>
               )}

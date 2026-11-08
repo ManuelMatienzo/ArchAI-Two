@@ -23,6 +23,11 @@ export const ModalAtajosTeclado: React.FC<ModalAtajosTecladoProps> = ({ onClose 
       categoria: 'Guardar y Archivo',
       items: [
         {
+          teclas: ['Ctrl', 'K'],
+          titulo: 'Búsqueda Rápida Spotlight',
+          descripcion: 'Abre la paleta de comandos para buscar clases, atributos, métodos y enfocar el lienzo.'
+        },
+        {
           teclas: ['Ctrl', 'S'],
           titulo: 'Guardar Diagrama',
           descripcion: 'Guarda en la nube y persistencia local sin abrir el cuadro de diálogo del navegador.'
@@ -53,6 +58,11 @@ export const ModalAtajosTeclado: React.FC<ModalAtajosTecladoProps> = ({ onClose 
           descripcion: 'Pega un clon de la clase copiada con nuevo identificador único (+40px).'
         },
         {
+          teclas: ['Ctrl', 'A'],
+          titulo: 'Seleccionar Todo',
+          descripcion: 'Selecciona todas las clases del modelo UML simultáneamente para moverlas o alinearlas.'
+        },
+        {
           teclas: ['Ctrl', 'D'],
           titulo: 'Duplicar Clase',
           descripcion: 'Clona instantáneamente la clase actualmente seleccionada en un solo paso.'
@@ -60,7 +70,7 @@ export const ModalAtajosTeclado: React.FC<ModalAtajosTecladoProps> = ({ onClose 
         {
           teclas: ['Supr'],
           titulo: 'Eliminar Selección',
-          descripcion: 'Elimina la relación o la clase seleccionada y sus conexiones (o Backspace).'
+          descripcion: 'Elimina las clases o la relación seleccionada y sus conexiones (o Backspace).'
         }
       ]
     },
@@ -68,9 +78,19 @@ export const ModalAtajosTeclado: React.FC<ModalAtajosTecladoProps> = ({ onClose 
       categoria: 'Navegación y Posicionamiento',
       items: [
         {
+          teclas: ['Shift', 'Clic'],
+          titulo: 'Selección Múltiple',
+          descripcion: 'Agrega o quita clases individuales a la selección en grupo.'
+        },
+        {
+          teclas: ['Shift', 'Arrastrar'],
+          titulo: 'Selección por Recuadro (Marquee)',
+          descripcion: 'Arrastra sobre el lienzo para encerrar y seleccionar múltiples clases a la vez.'
+        },
+        {
           teclas: ['↑', '↓', '←', '→'],
           titulo: 'Micro-desplazamiento (Nudge)',
-          descripcion: 'Mueve la clase seleccionada 8px alineada a la cuadrícula.'
+          descripcion: 'Mueve las clases seleccionadas 8px alineadas a la cuadrícula.'
         },
         {
           teclas: ['Shift', 'Flechas'],

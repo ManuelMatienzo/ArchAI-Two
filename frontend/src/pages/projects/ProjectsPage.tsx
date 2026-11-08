@@ -17,19 +17,30 @@ import {
   Trash2,
   FileCode2,
   Edit3,
-  Check
+  Check,
+  Upload,
+  FileJson
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { InformacionSesion } from '../../types/auth';
 import { ModeloDiagrama } from '../../types/uml';
 import { listarProyectos, crearProyecto, Proyecto } from '../../services/api';
 import { obtenerDiagramaPorId } from '../../services/diagramasPredefinidos';
 import { GlassModal } from '../../components/glass/GlassModal';
+import { LeftNavRail } from '../../components/layout/LeftNavRail';
+import {
+  openProjectFileDialog,
+  readAndImportProjectFile,
+  exportProjectAsArchAi
+} from '../../services/nativeProjectService';
 
-interface PaginaGestorProyectosProps {
-  session: InformacionSesion;
-  onLogout: () => void;
-  onOpenStudio: (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string) => void;
+export interface ProjectsPageProps {
+  session?: InformacionSesion;
+  onLogout?: () => void;
+  onOpenStudio?: (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string) => void;
 }
+
+export type PaginaGestorProyectosProps = ProjectsPageProps;
 
 interface DiagramaResumen {
   id: string;
@@ -113,11 +124,88 @@ const PROYECTOS_PREDETERMINADOS: Array<Proyecto & { diagramas: DiagramaResumen[]
   }
 ];
 
-export const PaginaGestorProyectos: React.FC<PaginaGestorProyectosProps> = ({
-  session,
-  onLogout,
-  onOpenStudio
+export const ProjectsPage: React.FC<ProjectsPageProps> = ({
+  session: propSession,
+  onLogout: propOnLogout,
+  onOpenStudio: propOnOpenStudio
 }) => {
+  const navigate = useNavigate();
+  const [session, setSession] = useState<InformacionSesion>(() => {
+    if (propSession) return propSession;
+    const guardado = localStorage.getItem('archai_session');
+    if (guardado) {
+      try {
+        const parsed = JSON.parse(guardado);
+        if (parsed?.currentUser) return parsed;
+      } catch {}
+    }
+    return {
+      roomId: 'ARC-MAIN',
+      roomName: 'Espacio Principal',
+      hostName: 'Arquitecto',
+      createdAt: new Date().toISOString(),
+      currentUser: {
+        id: 'usr-default',
+        name: 'Arquitecto ArchAI',
+        email: 'arquitecto@archai.io',
+        role: 'ARQUITECTO' as any,
+        isHost: true
+      },
+      participants: []
+    };
+  });
+
+  useEffect(() => {
+    if (propSession) {
+      setSession(propSession);
+    } else {
+      const guardado = localStorage.getItem('archai_session');
+      if (!guardado) {
+        navigate('/login', { replace: true });
+      }
+    }
+  }, [propSession, navigate]);
+
+  const onLogout = () => {
+    if (propOnLogout) {
+      propOnLogout();
+    } else {
+      localStorage.removeItem('archai_session');
+      localStorage.removeItem('archai_token');
+      localStorage.removeItem('archai_current_view');
+      localStorage.removeItem('archai_selected_diagram_id');
+      localStorage.removeItem('archai_selected_project_title');
+      localStorage.removeItem('archai_selected_diagram');
+    }
+    navigate('/login');
+  };
+
+  const onOpenStudio = (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string) => {
+    try {
+      localStorage.setItem('archai_current_view', 'estudio');
+      if (diagramId) localStorage.setItem('archai_selected_diagram_id', diagramId);
+      else localStorage.removeItem('archai_selected_diagram_id');
+
+      if (projectTitle) localStorage.setItem('archai_selected_project_title', projectTitle);
+      else localStorage.removeItem('archai_selected_project_title');
+
+      if (diagram) localStorage.setItem('archai_selected_diagram', JSON.stringify(diagram));
+      else localStorage.removeItem('archai_selected_diagram');
+    } catch (e) {
+      console.warn('Error al guardar estado de navegación local', e);
+    }
+
+    if (propOnOpenStudio) {
+      propOnOpenStudio(diagram, projectTitle, diagramId);
+    }
+    const search = new URLSearchParams();
+    if (diagramId) search.set('diagramId', diagramId);
+    if (projectTitle) search.set('title', projectTitle);
+    navigate({
+      pathname: diagramId ? `/studio/${diagramId}` : '/studio',
+      search: search.toString() ? `?${search.toString()}` : ''
+    }, { state: { diagram, projectTitle, diagramId } });
+  };
   const [proyectos, setProyectos] = useState<Array<Proyecto & { diagramas?: DiagramaResumen[] }>>(() => {
     try {
       const guardado = localStorage.getItem('archai_proyectos_locales');
@@ -322,6 +410,59 @@ export const PaginaGestorProyectos: React.FC<PaginaGestorProyectosProps> = ({
     setTimeout(() => setMensajeExito(null), 3000);
   };
 
+  /** Importar proyecto desde archivo nativo .archai.json o .json */
+  const handleImportarArchivo = async () => {
+    try {
+      const file = await openProjectFileDialog();
+      if (!file) return;
+
+      const importedDiagram = await readAndImportProjectFile(file);
+      const prjId = 'prj-' + Date.now();
+      const diagId = 'diag-' + Date.now();
+
+      const nuevoPrj: Proyecto & { diagramas: DiagramaResumen[] } = {
+        id: prjId,
+        nombre: importedDiagram.title || file.name.replace(/\.[^/.]+$/, ''),
+        descripcion: `Modelo importado desde '${file.name}' con ${importedDiagram.classes.length} clases y ${importedDiagram.relations.length} relaciones UML.`,
+        codigoAcceso: 'PRJ-' + Math.floor(1000 + Math.random() * 9000),
+        iconoColor: '#38bdf8',
+        estado: 'ACTIVO',
+        propietarioId: session.currentUser.id,
+        propietarioNombre: session.currentUser.name,
+        totalDiagramas: 1,
+        diagramas: [
+          {
+            id: diagId,
+            proyectoId: prjId,
+            titulo: importedDiagram.title || 'Diagrama Principal',
+            totalClases: importedDiagram.classes.length,
+            totalRelaciones: importedDiagram.relations.length,
+            actualizadoEn: 'Recién importado',
+            data: importedDiagram
+          }
+        ]
+      };
+
+      setProyectos(prev => [nuevoPrj, ...prev]);
+      notificar(`Proyecto '${nuevoPrj.nombre}' importado con éxito.`);
+      onOpenStudio(importedDiagram, nuevoPrj.nombre, diagId);
+    } catch (err: any) {
+      alert(`Error al importar archivo: ${err.message || 'Formato JSON inválido'}`);
+    }
+  };
+
+  /** Exportar un diagrama individual como .archai.json */
+  const handleExportarDiagrama = (proyecto: Proyecto & { diagramas?: DiagramaResumen[] }, diag: DiagramaResumen, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const diagModelo = diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion });
+      exportProjectAsArchAi(diagModelo, diag.titulo, session.currentUser.name);
+      notificar(`Diagrama '${diag.titulo}' exportado a .archai.json`);
+    } catch (err: any) {
+      alert(`Error al exportar: ${err.message || 'Error inesperado'}`);
+    }
+  };
+
   const handleCrearProyecto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nombreNuevoProyecto.trim()) return;
@@ -519,23 +660,67 @@ export const PaginaGestorProyectos: React.FC<PaginaGestorProyectosProps> = ({
 
   return (
     <div
-      className="gestor-proyectos-scroll"
       style={{
-        height: '100vh',
         width: '100vw',
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        backgroundColor: c.bgApp,
-        backgroundImage: isDark
-          ? 'radial-gradient(ellipse at 50% 0%, rgba(47, 44, 121, 0.25) 0%, transparent 70%)'
-          : 'radial-gradient(circle at 20% 20%, rgba(232, 195, 158, 0.28), transparent 50%), radial-gradient(circle at 80% 80%, rgba(23, 26, 74, 0.05), transparent 50%)',
-        color: c.textPrimary,
+        height: '100vh',
         display: 'flex',
-        flexDirection: 'column',
-        fontFamily: 'var(--font-sans, system-ui, -apple-system, sans-serif)',
-        transition: 'background-color 0.2s ease, color 0.2s ease'
+        overflow: 'hidden',
+        backgroundColor: c.bgApp,
+        position: 'relative'
       }}
     >
+      {/* 0. Barra Lateral de Navegación Unificada (CU-02 & Studio) */}
+      <LeftNavRail
+        activeTab="projects"
+        currentUser={session.currentUser}
+        onLogout={onLogout}
+        onOpenProjects={() => {
+          const scrollContainer = document.querySelector('.gestor-proyectos-scroll');
+          if (scrollContainer) scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onOpenStudio={() => {
+          const primerDiagMeta = proyectos[0]?.diagramas?.[0];
+          const diagId = primerDiagMeta?.id || 'diag-core-mvc';
+          const diagTitulo = primerDiagMeta?.titulo || 'Sistema de Comercio Electrónico v1.2';
+          const diagModelo = primerDiagMeta?.data || obtenerDiagramaPorId(diagId, diagTitulo);
+          onOpenStudio(diagModelo, diagTitulo, diagId);
+        }}
+        onSelectTab={(tab) => {
+          if (tab === 'canvas') {
+            const primerDiagMeta = proyectos[0]?.diagramas?.[0];
+            const diagId = primerDiagMeta?.id || 'diag-core-mvc';
+            const diagTitulo = primerDiagMeta?.titulo || 'Sistema de Comercio Electrónico v1.2';
+            const diagModelo = primerDiagMeta?.data || obtenerDiagramaPorId(diagId, diagTitulo);
+            onOpenStudio(diagModelo, diagTitulo, diagId);
+          } else if (tab === 'team') {
+            navigate('/team');
+          } else if (tab === 'settings') {
+            navigate('/settings');
+          }
+        }}
+      />
+
+      {/* Contenedor Principal con Scroll */}
+      <div
+        className="gestor-proyectos-scroll"
+        style={{
+          flex: 1,
+          height: '100vh',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          backgroundColor: c.bgApp,
+          backgroundImage: isDark
+            ? 'radial-gradient(ellipse at 50% 0%, rgba(47, 44, 121, 0.25) 0%, transparent 70%)'
+            : 'radial-gradient(circle at 20% 20%, rgba(232, 195, 158, 0.28), transparent 50%), radial-gradient(circle at 80% 80%, rgba(23, 26, 74, 0.05), transparent 50%)',
+          color: c.textPrimary,
+          display: 'flex',
+          flexDirection: 'column',
+          fontFamily: 'var(--font-sans, system-ui, -apple-system, sans-serif)',
+          transition: 'background-color 0.2s ease, color 0.2s ease',
+          minWidth: 0,
+          position: 'relative'
+        }}
+      >
       {/* 1. Header Superior Compacto (52px) */}
       <header style={{
         height: '52px',
@@ -620,6 +805,30 @@ export const PaginaGestorProyectos: React.FC<PaginaGestorProyectosProps> = ({
           >
             <Sparkles size={14} color={c.badgeText} />
             <span>Lienzo UML Directo</span>
+          </button>
+
+          {/* Botón Importar Archivo .archai.json */}
+          <button
+            onClick={handleImportarArchivo}
+            className="btn-studio-glass"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              color: isDark ? '#38bdf8' : '#0284c7',
+              background: isDark ? 'rgba(56, 189, 248, 0.12)' : 'rgba(2, 132, 199, 0.08)',
+              border: `1px solid ${isDark ? 'rgba(56, 189, 248, 0.35)' : 'rgba(2, 132, 199, 0.25)'}`,
+              borderRadius: '7px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            title="Importar proyecto o diagrama desde archivo local (.archai.json)"
+          >
+            <Upload size={14} color={isDark ? '#38bdf8' : '#0284c7'} />
+            <span>Importar (.archai.json)</span>
           </button>
 
           {/* Botón Nuevo Proyecto */}
@@ -1139,6 +1348,21 @@ export const PaginaGestorProyectos: React.FC<PaginaGestorProyectosProps> = ({
                               title="Renombrar / Editar título del diagrama"
                             >
                               <Edit3 size={11} />
+                            </button>
+                            <button
+                              onClick={(e) => handleExportarDiagrama(proyecto, diag, e)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: isDark ? '#38bdf8' : '#0284c7',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                display: 'flex',
+                                alignItems: 'center'
+                              }}
+                              title="Exportar respaldo como archivo nativo (.archai.json)"
+                            >
+                              <FileJson size={11} />
                             </button>
                             <button
                               onClick={(e) => handleEliminarDiagrama(proyecto.id, diag.id, e)}
@@ -1723,6 +1947,11 @@ export const PaginaGestorProyectos: React.FC<PaginaGestorProyectosProps> = ({
           </div>
         </form>
       </GlassModal>
+      </div>
     </div>
   );
 };
+
+// Alias de retrocompatibilidad
+export const PaginaGestorProyectos = ProjectsPage;
+export default ProjectsPage;

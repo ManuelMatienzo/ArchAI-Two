@@ -33,6 +33,14 @@ Además, hay **trabajo sin commitear** del usuario que NO se debe sobrescribir:
 `agenteDiagrama.ts`, `exportarXmiEA.ts`, `ollamaService.ts`, `FloatingAiAssistant.tsx`,
 `index.css`, `aiVoiceParser.ts`, `vite.config.ts`. Realiza ediciones quirúrgicas con `edit`.
 
+## 🛡️ REGLA #3 — CERO ELEMENTOS DE DEPURACIÓN EN LA UI COMERCIAL (estricto)
+
+**Cuando el usuario solicite comprobar, revisar o conectar algo en la conversación, NUNCA agregues badges, banners de diagnóstico, números de puerto (ej. `(8000)`), estados de servidor en vivo o botones de "modo prueba / evaluación" en la interfaz visual de la aplicación.**
+
+- **El cliente final NO debe ver detalles de depuración interna:** La UI (tanto Web como Móvil) debe lucir 100% limpia, comercial y profesional.
+- **Manejo de fallos:** Si un servicio o backend está caído, se notifica únicamente como un mensaje de error estándar al enviar el formulario (ej. *"No se pudo conectar con el servidor. Intenta de nuevo más tarde."*), jamás con un cartel de diagnóstico permanente en pantalla.
+- **Cero etiquetas de prueba:** No colocar textos como *"Para Evaluación"*, *"Sin Backend"*, o IPs locales (`10.0.2.2`) en pantallas de producción.
+
 ## ⚡ Datos del entorno
 
 | Componente | Valor |

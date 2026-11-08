@@ -18,19 +18,33 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {})
-    },
-    ...options
-  });
+  const token = typeof window !== 'undefined' ? localStorage.getItem('archai_token') : null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(options?.headers as Record<string, string> || {})
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers
+    });
+  } catch (err: any) {
+    throw new ApiError(
+      0,
+      `No se pudo conectar con el servidor backend en ${API_BASE_URL}. Asegúrate de que el backend Spring Boot esté corriendo (ejecuta: .\\mvnw.cmd spring-boot:run)`
+    );
+  }
 
   if (!res.ok) {
     let mensaje = `Error del servidor (${res.status})`;
     try {
       const cuerpo = await res.json();
       if (cuerpo?.mensaje) mensaje = cuerpo.mensaje;
+      else if (cuerpo?.message) mensaje = cuerpo.message;
+      else if (cuerpo?.error) mensaje = cuerpo.error;
     } catch {
       /* el cuerpo no es JSON */
     }
@@ -39,6 +53,25 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
   if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
+}
+
+/** Verifica si el backend Spring Boot está respondiendo en el puerto 8000 */
+export async function verificarConexionBackend(): Promise<{ online: boolean; mensaje: string }> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const res = await fetch(`${API_BASE_URL}/api/v1/auth/status`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const txt = await res.text();
+      return { online: true, mensaje: txt || 'Backend Spring Boot activo en http://localhost:8000' };
+    }
+    return { online: true, mensaje: `Servidor respondiendo (${res.status})` };
+  } catch {
+    return { online: false, mensaje: 'Backend no detectado en http://localhost:8000' };
+  }
 }
 
 export function apiUrl(path: string): string {

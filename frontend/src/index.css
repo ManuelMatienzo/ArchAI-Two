@@ -1215,6 +1215,11 @@ h1, h2, h3, h4, h5, h6 {
   transition: all 0.2s ease;
 }
 
+.glass-textfield::placeholder {
+  color: var(--text-subtle);
+  opacity: 0.85;
+}
+
 .glass-textfield:focus {
   border-color: var(--glass-accent);
   box-shadow: 0 0 0 3px rgba(232, 195, 158, 0.18);
@@ -1292,21 +1297,53 @@ h1, h2, h3, h4, h5, h6 {
   animation: scaleUp 0.15s ease-out;
 }
 
-.glass-login-modal {
-  background: rgba(255, 255, 255, 0.09) !important;
+.glass-login-modal,
+[data-theme="dark"] .glass-login-modal {
+  background: rgba(15, 18, 54, 0.94) !important;
   backdrop-filter: blur(28px) saturate(190%) !important;
   -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
-  border: 1.5px solid rgba(255, 255, 255, 0.18) !important;
+  border: 1.5px solid rgba(232, 195, 158, 0.45) !important;
   border-radius: 20px !important;
-  box-shadow: 0 0 50px rgba(0, 0, 0, 0.7), 0 25px 60px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 24px 64px -12px rgba(0, 0, 32, 0.85), 0 0 24px rgba(232, 195, 158, 0.12) !important;
 }
 
 [data-theme="light"] .glass-login-modal {
-  background: rgba(255, 255, 255, 0.86) !important;
+  background: rgba(255, 255, 255, 0.98) !important;
   backdrop-filter: blur(28px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
-  border-color: rgba(255, 255, 255, 0.90) !important;
-  box-shadow: 0 20px 50px -10px rgba(15, 23, 42, 0.15) !important;
+  border: 1.5px solid rgba(232, 195, 158, 0.85) !important;
+  box-shadow: 0 24px 60px -10px rgba(23, 26, 74, 0.18), 0 0 2px rgba(23, 26, 74, 0.20) !important;
+}
+
+/* Lucidez y contraste extremo en campos del Login */
+[data-theme="light"] .glass-login-modal .glass-textfield {
+  background: #ffffff !important;
+  border: 1.5px solid rgba(23, 26, 74, 0.28) !important;
+  color: #000020 !important;
+  font-weight: 600 !important;
+}
+[data-theme="light"] .glass-login-modal .glass-textfield:focus {
+  border-color: #171a4a !important;
+  box-shadow: 0 0 0 3px rgba(23, 26, 74, 0.12) !important;
+}
+[data-theme="light"] .glass-login-modal .glass-textfield-label {
+  color: #000020 !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="dark"] .glass-login-modal .glass-textfield {
+  background: rgba(8, 10, 35, 0.85) !important;
+  border: 1.5px solid rgba(232, 195, 158, 0.35) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+[data-theme="dark"] .glass-login-modal .glass-textfield:focus {
+  border-color: #e8c39e !important;
+  box-shadow: 0 0 0 3px rgba(232, 195, 158, 0.20) !important;
+}
+[data-theme="dark"] .glass-login-modal .glass-textfield-label {
+  color: #f5e1ce !important;
+  font-weight: 700 !important;
 }
 
 /* ======================================================== */

@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { BrowserRouter } from 'react-router-dom';
 import { InformacionSesion } from './types/auth';
 import { ModeloDiagrama } from './types/uml';
-import { PaginaInicioSesion, PaginaEstudioCanvas, PaginaGestorProyectos } from './paginas';
+import { AppRoutes } from './routes/AppRoutes';
 
 export default function App() {
   const [session, setSession] = useState<InformacionSesion | null>(() => {
@@ -14,11 +15,6 @@ export default function App() {
       }
     }
     return null;
-  });
-
-  const [currentView, setCurrentView] = useState<'proyectos' | 'estudio'>(() => {
-    const saved = localStorage.getItem('archai_current_view');
-    return (saved === 'estudio' || saved === 'proyectos') ? saved : 'proyectos';
   });
 
   const [selectedDiagramId, setSelectedDiagramId] = useState<string | undefined>(() => {
@@ -48,10 +44,8 @@ export default function App() {
 
   const handleLoginSuccess = (sesion: InformacionSesion, targetView?: 'proyectos' | 'estudio') => {
     setSession(sesion);
-    const view = targetView || 'proyectos';
-    setCurrentView(view);
     try {
-      localStorage.setItem('archai_current_view', view);
+      localStorage.setItem('archai_current_view', targetView || 'proyectos');
     } catch {}
   };
 
@@ -63,7 +57,6 @@ export default function App() {
     localStorage.removeItem('archai_selected_project_title');
     localStorage.removeItem('archai_selected_diagram');
     setSession(null);
-    setCurrentView('proyectos');
     setSelectedDiagram(undefined);
     setSelectedProjectTitle(undefined);
     setSelectedDiagramId(undefined);
@@ -73,7 +66,6 @@ export default function App() {
     setSelectedDiagram(diagram);
     setSelectedProjectTitle(projectTitle);
     setSelectedDiagramId(diagramId);
-    setCurrentView('estudio');
 
     try {
       localStorage.setItem('archai_current_view', 'estudio');
@@ -91,34 +83,23 @@ export default function App() {
   };
 
   const handleBackToProjects = () => {
-    setCurrentView('proyectos');
     try {
       localStorage.setItem('archai_current_view', 'proyectos');
     } catch {}
   };
 
-  if (!session) {
-    return <PaginaInicioSesion alIniciarSesion={handleLoginSuccess} />;
-  }
-
-  if (currentView === 'proyectos') {
-    return (
-      <PaginaGestorProyectos
+  return (
+    <BrowserRouter>
+      <AppRoutes
         session={session}
+        onLoginSuccess={handleLoginSuccess}
         onLogout={handleLogout}
         onOpenStudio={handleOpenStudio}
+        onBackToProjects={handleBackToProjects}
+        selectedDiagram={selectedDiagram}
+        selectedProjectTitle={selectedProjectTitle}
+        selectedDiagramId={selectedDiagramId}
       />
-    );
-  }
-
-  return (
-    <PaginaEstudioCanvas
-      session={session}
-      onLogout={handleLogout}
-      initialDiagram={selectedDiagram}
-      projectTitle={selectedProjectTitle}
-      diagramId={selectedDiagramId}
-      onOpenProjects={handleBackToProjects}
-    />
+    </BrowserRouter>
   );
 }
