@@ -36,6 +36,7 @@ import {
 import { calcularMadurezProyecto } from '../../services/softwareMaturity';
 import { generarMetodosSugeridos } from '../../services/projectBrainService';
 import { ClienteStomp } from '../../services/stompClient';
+import { ProposalPanel, useProposals } from '../../components/collaboration/ProposalPanel';
 import { generateXmiXml } from '../../services/codeGenerator';
 import { exportarXmiEnterpriseArchitect } from '../../services/exportarXmiEA';
 import { normalizarDiagrama } from '../../services/agenteDiagrama';
@@ -629,6 +630,10 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   );
   // CU-03: bandera para NO golpear la nube con guardados durante un arrastre en curso (solo al soltar)
   const arrastreEnCursoRef = useRef<boolean>(false);
+  const proposals = useProposals(currentSession, diagram, estadoColab === 'conectado',
+    (type, data) => stompRef.current?.publicar(type,data), `${currentSession.currentUser.id}#${miInstanciaIdRef.current}`);
+  const proposalsRef = useRef(proposals);
+  proposalsRef.current = proposals;
 
   // Espejo del diagrama para comparar cambios sin reintroducir dependencias circulares
   useEffect(() => { diagramRef.current = diagram; }, [diagram]);
@@ -649,6 +654,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         if (!activo) return;
         const tipo = payload?.tipo;
         const emisorId = payload?.emisorId;
+        if (tipo?.startsWith('ia_')) { proposalsRef.current.receive(payload); return; }
 
         // Ignorar únicamente ecos de esta misma pestaña
         if (emisorId === emisorIdInstancia) return;
@@ -1528,6 +1534,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       {/* 1. Barra Lateral de Navegación */}
       <BarraLateralNavegacion
         activeTab={activeRailTab}
+        assistantOpen={proposals.open}
+        onToggleAssistant={() => {setActiveRailTab('canvas');proposals.setOpen(!proposals.open);}}
         onSelectTab={handleSelectRailTab}
         currentUser={currentSession.currentUser}
         onLogout={onLogout}
@@ -1696,6 +1704,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             onNotificar={(texto, tipo = 'ok') => setSaveInfo({ tipo, texto })}
           />
 
+          {/* Asesor colaborativo CU-15; conserva el asistente de comandos existente. */}
+          <ProposalPanel state={proposals} host={currentSession.currentUser.isHost}/>
           {/* 5. Asistente de IA Flotante (NLP y Comandos por Voz) */}
           {isAiAssistantOpen && (
             <AsistenteIaFlotante

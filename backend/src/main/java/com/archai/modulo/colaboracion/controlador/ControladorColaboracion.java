@@ -15,10 +15,29 @@ public class ControladorColaboracion {
 
     private final SimpMessagingTemplate messagingTemplate;
     private final ServicioSalaColaborativa servicioSalaColaborativa;
+    private final com.archai.modulo.colaboracion.servicio.CoordinadorPropuestas propuestas;
 
     @MessageMapping("/collab/{salaId}")
     public void retransmitirAccionColaborativa(@DestinationVariable String salaId, @Payload MensajeColaboracionDto mensaje) {
         mensaje.setTimestamp(System.currentTimeMillis());
+        mensaje.setSalaId(salaId);
+        if (mensaje.getTipo() != null && mensaje.getTipo().startsWith("ia_")) {
+            if (!(mensaje.getPayload() instanceof java.util.Map<?,?>)) return;
+            String user = String.valueOf(mensaje.getEmisorId()).split("#")[0];
+            boolean host = servicioSalaColaborativa.esAnfitrion(salaId, user);
+            @SuppressWarnings("unchecked")
+            var datos = (java.util.Map<String,Object>) mensaje.getPayload();
+            var result = propuestas.procesar(salaId, mensaje.getTipo(), mensaje.getEmisorId(), datos, host);
+            if (result == null) {
+                if ("ia_auto".equals(mensaje.getTipo())) {
+                    mensaje.setTipo("ia_denied");
+                    messagingTemplate.convertAndSend("/topic/collab/" + salaId, mensaje);
+                }
+                return;
+            }
+            mensaje.setPayload(result);
+            if ("ia_sync".equals(mensaje.getTipo())) mensaje.setTipo("ia_settings");
+        }
 
         // CU-03 · Persistir el diagrama activo en memoria de la sala
         if ("diagrama".equalsIgnoreCase(mensaje.getTipo()) && mensaje.getPayload() != null) {

@@ -16,9 +16,14 @@ import java.util.List;
 public class ArchAiApplication {
 
     public static void main(String[] args) {
-        loadDotEnv();
-        sanitizeAndApplyDatabaseProperties();
-        checkAndFallbackIfUnreachable();
+        boolean isolated = java.util.Arrays.asList(args).contains("--spring.profiles.active=local-test")
+                || "local-test".equals(System.getProperty("spring.profiles.active"))
+                || "local-test".equals(System.getenv("SPRING_PROFILES_ACTIVE"));
+        if (!isolated) {
+            loadDotEnv();
+            sanitizeAndApplyDatabaseProperties();
+            checkAndFallbackIfUnreachable();
+        }
         SpringApplication.run(ArchAiApplication.class, args);
     }
 

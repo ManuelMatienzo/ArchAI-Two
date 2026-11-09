@@ -22,6 +22,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class ServicioSalaColaborativa {
 
+    public boolean esAnfitrion(String pin, String usuarioId) {
+        SalaColaborativa sala = salas.get(normalizarPin(pin));
+        return sala != null && sala.getAnfitrion() != null
+                && usuarioId.equals(sala.getAnfitrion().getId());
+    }
+
     private static final String PREFIJO_PIN = "ARC-";
 
     private final Map<String, SalaColaborativa> salas = new ConcurrentHashMap<>();
