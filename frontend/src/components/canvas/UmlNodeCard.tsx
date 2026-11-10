@@ -62,6 +62,7 @@ const STEREO_ICONS: Record<string, { icon: React.ReactNode }> = {
 };
 
 export interface UmlNodeCardProps {
+  draft?: boolean;
   cls: ClaseUml;
   diagram: ModeloDiagrama;
   isSelected: boolean;
@@ -145,6 +146,7 @@ export interface UmlNodeCardProps {
  * - El JSX es el mismo que estaba en el lienzo (movido sin cambios de lógica).
  */
 export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNodeCard({
+  draft = false,
   cls,
   diagram,
   isSelected,
@@ -237,7 +239,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
           }
         }
       }}
-      className={`uml-class-node ${isSelected ? 'node-selected' : ''} ${isDragging ? 'dragging' : ''} ${isRemoteDragging ? 'remote-dragging' : ''}`}
+      className={`uml-class-node ${draft ? 'proposal-ghost-node' : ''} ${isSelected ? 'node-selected' : ''} ${isDragging ? 'dragging' : ''} ${isRemoteDragging ? 'remote-dragging' : ''}`}
       onMouseDown={e => onMouseDown(e, cls)}
       style={{
         left: `${pos.x}px`,
@@ -262,6 +264,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         cursor: isConnectingTarget ? 'pointer' : undefined
       }}
     >
+      {draft && <span className="proposal-ghost-label">Propuesta IA</span>}
       {/* Badge flotante: Origen de conexión */}
       {isConnectingSource && (
         <div

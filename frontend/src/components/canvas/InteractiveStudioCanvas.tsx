@@ -1,3 +1,4 @@
+import { DraftDiagram } from '../../services/proposalDraft';
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Plus,
@@ -47,6 +48,9 @@ import { UmlNodeCard } from './UmlNodeCard';
 
 interface InteractiveStudioCanvasProps {
   diagram: ModeloDiagrama;
+  proposalDraft?: DraftDiagram;
+  onDraftMove?: (id:string,position:{x:number;y:number})=>void;
+  onInspectDraft?: (id:string)=>void;
   session: InformacionSesion;
   selectedClassId: string | null;
   onSelectClass: (classId: string | null) => void;
@@ -106,6 +110,7 @@ const PALETTE_COLORS = [
 
 export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = ({
   diagram,
+  proposalDraft, onDraftMove, onInspectDraft,
   session,
   selectedClassId,
   onSelectClass,
@@ -382,6 +387,23 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   }, [remoteCursors, session.currentUser?.id]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [ghostPosition,setGhostPosition] = useState<{id:string;x:number;y:number}|null>(null);
+  const ghostCleanup=useRef<(()=>void)|null>(null);
+  useEffect(()=>()=>ghostCleanup.current?.(),[]);
+  useEffect(()=>{setGhostPosition(null);},[proposalDraft]);
+  const previewKey=proposalDraft?.classes.map(c=>c.id).join('|') || '';
+  const ghostIds=new Set(proposalDraft?.classes.map(c=>c.id) || []);
+  const ghostRelationIds=new Set(proposalDraft?.relations.map(r=>r.id) || []);
+  const onGhostMouseDown=(event:React.MouseEvent,cls:ClaseUml)=>{
+    event.stopPropagation(); onSelectClass(null);setSelectedClassIds(new Set());setSelectedRelationId(null);onInspectDraft?.(cls.id);
+    if(!onDraftMove || event.button!==0)return;
+    event.preventDefault(); ghostCleanup.current?.();
+    const origin=cls.position || {x:0,y:0}; const start={x:event.clientX,y:event.clientY}; let position=origin;
+    const move=(e:MouseEvent)=>{position={x:Math.max(0,origin.x+(e.clientX-start.x)/zoom),y:Math.max(0,origin.y+(e.clientY-start.y)/zoom)};setGhostPosition({id:cls.id,...position});};
+    const cleanup=()=>{window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',up);};
+    const up=()=>{cleanup();onDraftMove(cls.id,position);};
+    ghostCleanup.current=cleanup; window.addEventListener('mousemove',move);window.addEventListener('mouseup',up,{once:true});
+  };
 
   // --- Optimized drag/pan with requestAnimationFrame & Grid Snapping ---
   const frameRef = useRef<number | null>(null);
@@ -2365,7 +2387,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
   // Ajustar todo el diagrama a la pantalla visible (Auto-Fit & Centrado inteligente sin desbordamiento)
   const handleFitToScreen = (customClasses?: ClaseUml[]) => {
-    const classesToFit = customClasses || diagram.classes;
+    const classesToFit = customClasses || [...diagram.classes,...(proposalDraft?.classes || [])];
     if (!canvasRef.current || classesToFit.length === 0) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
@@ -2383,7 +2405,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
     classesToFit.forEach(cls => {
       const pos = cls.position || { x: 60, y: 40 };
-      const cardH = Math.max(160, 65 + (cls.attributes?.length || 0) * 26 + (cls.methods?.length || 0) * 26);
+      const cardH = nodeDimensionsRef.current.get(cls.id)?.h || Math.max(220, 180 + (cls.attributes?.length || 0) * 38 + (cls.methods?.length || 0) * 38);
       const cardW = 330;
 
       if (pos.x < minX) minX = pos.x;
@@ -2402,11 +2424,12 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const diagramH = Math.max(100, maxY - minY);
 
     // MÃ¡rgenes seguros: 40px a los lados, 40px arriba, 95px abajo para librar el Dock perfectamente
+    const reserved = proposalDraft && rect.width > 900 ? 410 : 0;
     const padX = 40;
-    const padTop = 40;
+    const padTop = proposalDraft ? 100 : 40;
     const padBottom = 95;
 
-    const availW = Math.max(200, rect.width - padX * 2);
+    const availW = Math.max(200, rect.width - padX * 2 - reserved);
     const availH = Math.max(200, rect.height - padTop - padBottom);
 
     const scaleX = availW / diagramW;
@@ -2415,7 +2438,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     const idealZoom = Number(Math.min(1.0, Math.max(0.08, Math.min(scaleX, scaleY))).toFixed(2));
 
     // Centrar en el Ã¡rea visible segura
-    const targetCenterX = padX + availW / 2;
+    const targetCenterX = reserved + padX + availW / 2;
     const targetCenterY = padTop + availH / 2;
 
     const diagramCenterX = minX + diagramW / 2;
@@ -2520,7 +2543,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const lastFittedDiagramRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const key = `${diagram.title}-${diagram.classes.length}`;
+    const key = `${diagram.title}-${diagram.classes.length}-${previewKey}`;
     if (lastFittedDiagramRef.current !== key && diagram.classes.length > 0) {
       lastFittedDiagramRef.current = key;
       const timer = setTimeout(() => {
@@ -2528,7 +2551,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       }, 70);
       return () => clearTimeout(timer);
     }
-  }, [diagram.title, diagram.classes.length]);
+  }, [diagram.title, diagram.classes.length, previewKey]);
 
   // Re-ajustar si el usuario redimensiona la ventana
   useEffect(() => {
@@ -2539,10 +2562,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [diagram.classes]);
+  }, [diagram.classes, proposalDraft]);
 
   // Local preview of classes while dragging (committed to the diagram on mouse up)
-  const displayedClasses = useMemo(() => {
+  const officialDisplayedClasses = useMemo(() => {
     if (!draggingClassId || !dragPos) return diagram.classes;
     if (multiDragDelta && selectedClassIds.size > 1 && selectedClassIds.has(draggingClassId)) {
       const { deltaX, deltaY } = multiDragDelta;
@@ -2565,8 +2588,11 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     );
   }, [diagram.classes, draggingClassId, dragPos, multiDragDelta, selectedClassIds]);
 
+  const displayedClasses=useMemo(()=>[...officialDisplayedClasses,...(proposalDraft?.classes || []).map(c=>ghostPosition?.id===c.id?{...c,position:{x:ghostPosition.x,y:ghostPosition.y}}:c)],[officialDisplayedClasses,proposalDraft,ghostPosition]);
+
   // Calculate SVG connector paths dynamically with ultra-smooth cubic bezier S-curves and true node bounding boxes
   const relationPaths = useMemo(() => {
+    const renderRelations=[...diagram.relations,...(proposalDraft?.relations || [])];
     // Helper para estimar altura si el elemento aÃºn no ha sido medido en el DOM
     const estimarAlturaFallback = (cls: ClaseUml, totalRelaciones: number): number => {
       const attrCount = cls.attributes?.length || 0;
@@ -2583,7 +2609,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     displayedClasses.forEach(cls => {
       const pos = cls.position || { x: 100, y: 100 };
       const measured = nodeDimensionsRef.current.get(cls.id);
-      const connCount = diagram.relations.filter(r => r.sourceClassId === cls.id || r.targetClassId === cls.id).length;
+      const connCount = renderRelations.filter(r => r.sourceClassId === cls.id || r.targetClassId === cls.id).length;
       const w = measured?.w && measured.w > 80 ? measured.w : 330;
       const h = measured?.h && measured.h > 80 ? measured.h : estimarAlturaFallback(cls, connCount);
       classMap.set(cls.id, {
@@ -2612,15 +2638,15 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
     // UML 2.5: Identificar clases asociativas activas vinculadas
     const activeAssocClassIds = new Set<string>();
-    diagram.relations.forEach(r => {
+    renderRelations.forEach(r => {
       if (r.associationClassId) activeAssocClassIds.add(r.associationClassId);
     });
     displayedClasses.forEach(c => {
-      if (esClaseAsociativaUniversal(c, diagram.relations)) activeAssocClassIds.add(c.id);
+      if (esClaseAsociativaUniversal(c, renderRelations)) activeAssocClassIds.add(c.id);
     });
 
     // Descartar aristas binarias directas hacia clases asociativas en el trazado visual (UML 2.5)
-    const relationsToRender = diagram.relations.filter(rel => {
+    const relationsToRender = renderRelations.filter(rel => {
       // Si la arista apunta o nace de una clase asociativa, NO renderizarla como lÃ­nea binaria
       if (activeAssocClassIds.has(rel.sourceClassId) || activeAssocClassIds.has(rel.targetClassId)) {
         return false;
@@ -2964,7 +2990,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         associationClassId: assocId
       };
     });
-  }, [displayedClasses, diagram.relations, dimensionTick]);
+  }, [displayedClasses, diagram.relations, dimensionTick, proposalDraft]);
 
   const userColor = session.currentUser?.avatarColor || 'var(--accent-primary)';
 
@@ -3279,10 +3305,11 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
         {/* Render Connection Lines (UML 2.5 rigorous rendering) */}
         <RelationLayer
+          draftIds={ghostRelationIds}
           paths={relationPaths}
           selectedRelationId={selectedRelationId}
           hoveredRelationId={hoveredRelationId}
-          onSelectRelation={stableOnSelectRelation}
+          onSelectRelation={id=>{if(ghostRelationIds.has(id))onInspectDraft?.(id);else stableOnSelectRelation(id);}}
           onHoverRelation={stableOnHoverRelation}
           onDeleteRelation={stableOnDeleteRelation}
           onClearClassSelection={stableOnClearClassSelection}
@@ -4081,14 +4108,15 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           <UmlNodeCard
             key={cls.id}
             cls={cls}
-            diagram={diagram}
+            draft={ghostIds.has(cls.id)}
+            diagram={ghostIds.has(cls.id)?{...diagram,classes:displayedClasses,relations:[...diagram.relations,...(proposalDraft?.relations || [])]}:diagram}
             isSelected={selectedClassIds.has(cls.id) || selectedClassId === cls.id}
             isConnectingSource={connectingSourceId === cls.id}
             isConnectingTarget={Boolean(connectingSourceId && connectingSourceId !== cls.id)}
             isDragging={draggingClassId === cls.id || Boolean(draggingClassId && selectedClassIds.has(draggingClassId) && selectedClassIds.has(cls.id))}
             isRemoteDragging={Boolean(remoteDraggingNodes?.[cls.id] && draggingClassId !== cls.id)}
             remoteDragInfo={remoteDraggingNodes?.[cls.id]}
-            canEdit={!userPermissions || userPermissions.canEditDiagram}
+            canEdit={!ghostIds.has(cls.id) && (!userPermissions || userPermissions.canEditDiagram)}
             editingClassId={editingClassId}
             editingClassName={editingClassName}
             editingClassStereotype={editingClassStereotype}
@@ -4109,7 +4137,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             selectedRelationId={selectedRelationId}
             nodeDimensionsRef={nodeDimensionsRef}
             setDimensionTick={setDimensionTick}
-            onMouseDown={stableOnClassMouseDown}
+            onMouseDown={ghostIds.has(cls.id)?onGhostMouseDown:stableOnClassMouseDown}
             onStartEditingClass={stableOnStartEditingClass}
             onSaveEditingClass={stableOnSaveEditingClass}
             onDeleteClass={onDeleteClass}

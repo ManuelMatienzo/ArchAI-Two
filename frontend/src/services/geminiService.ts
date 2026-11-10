@@ -47,6 +47,19 @@ interface ConfiguracionGeneracion {
   temperature?: number;
   maxOutputTokens?: number;
   responseMimeType?: 'application/json' | 'text/plain';
+  reportErrors?: boolean;
+  signal?: AbortSignal;
+}
+
+class GeminiProviderError extends Error {}
+
+function providerError(status: number): GeminiProviderError {
+  if (status === 429) return new GeminiProviderError('Gemini alcanzó su límite de cuota o de solicitudes. Espera antes de reintentar y revisa la cuota del proyecto de Google AI.');
+  if (status === 401 || status === 403) return new GeminiProviderError('Gemini rechazó el acceso. Revisa la clave y los permisos del proyecto de Google AI.');
+  if (status === 404) return new GeminiProviderError('El modelo de Gemini configurado no está disponible para generar contenido. Revisa la configuración del modelo.');
+  if (status === 400) return new GeminiProviderError('Gemini rechazó el formato de la solicitud o sus parámetros. Revisa la compatibilidad del modelo configurado.');
+  if (status >= 500) return new GeminiProviderError('Gemini no está disponible temporalmente. Intenta más tarde o selecciona Local.');
+  return new GeminiProviderError('Gemini no pudo procesar la consulta. Intenta nuevamente o selecciona Local.');
 }
 
 /**
@@ -60,7 +73,10 @@ export async function generarContenidoGemini(
   timeoutMs = 120000
 ): Promise<string | null> {
   const apiKey = obtenerGeminiApiKey();
-  if (!apiKey) return null;
+  if (!apiKey) {
+    if (config.reportErrors) throw new GeminiProviderError('Configura Gemini antes de usar el modo Nube.');
+    return null;
+  }
 
   const payload = {
     systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -72,27 +88,35 @@ export async function generarContenidoGemini(
     }
   };
 
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(
-      `${BASE_URL}/models/${MODELO_GEMINI}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      `${BASE_URL}/models/${MODELO_GEMINI}:generateContent`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(payload),
-        signal: controller.signal
+        signal: config.signal ? AbortSignal.any([controller.signal, config.signal]) : controller.signal
       }
     );
-    clearTimeout(tid);
-    if (!res.ok) return null;
+    if (!res.ok) throw providerError(res.status);
 
     const data = await res.json();
     const parts: any[] = data?.candidates?.[0]?.content?.parts || [];
     const texto = parts.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('').trim();
-    return texto || null;
-  } catch {
+    if (!texto) throw new GeminiProviderError('Gemini devolvió una respuesta sin texto. Intenta una consulta más breve o selecciona Local.');
+    return texto;
+  } catch (error) {
+    if (config.reportErrors) {
+      if (config.signal?.aborted) throw new GeminiProviderError('La consulta se canceló.');
+      if (controller.signal.aborted) throw new GeminiProviderError('Gemini tardó demasiado en responder. Intenta una consulta más breve o selecciona Local.');
+      if (error instanceof GeminiProviderError) throw error;
+      throw new GeminiProviderError('No se pudo establecer conexión con Gemini. Revisa tu conexión y vuelve a intentar.');
+    }
     return null;
+  } finally {
+    clearTimeout(tid);
   }
 }
 

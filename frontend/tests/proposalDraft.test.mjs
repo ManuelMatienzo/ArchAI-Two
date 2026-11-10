@@ -1,0 +1,14 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+const bundle=await build({entryPoints:['src/services/proposalDraft.ts'],bundle:true,write:false,format:'esm',platform:'node'});
+const {normalizeProposal}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const official={title:'Clínica',updatedAt:'',classes:[{id:'paciente',name:'Paciente',position:{x:20,y:40},attributes:[{id:'a',name:'nombre',type:'String',visibility:'+',isReadOnly:true}],methods:[]}],relations:[]};
+const before=JSON.stringify(official);
+const result=normalizeProposal({classes:[{name:'Receta',attributes:[{name:'medicamento',type:'String'}],methods:[]}],relations:[{sourceName:'Paciente',targetName:'Receta',type:'ASSOCIATION_1_N'}]},official);
+assert.equal(result.relations[0].sourceClassId,'paciente');assert.equal(result.relations[0].targetClassId,result.classes[0].id);
+assert.equal(result.relations[0].targetMultiplicity,'0..*');assert.equal(result.classes.length,1);assert.equal(JSON.stringify(official),before);
+const update=normalizeProposal({classes:[{name:'Paciente',targetClassId:'paciente',attributes:[{name:'edad',type:'Integer'}],methods:[]}],relations:[]},official);
+assert.equal(update.classes[0].targetClassId,'paciente');assert.deepEqual(update.classes[0].attributes.map(a=>a.name),['edad']);
+assert.throws(()=>normalizeProposal({classes:[],relations:[{sourceName:'NoExiste',targetName:'Paciente',type:'ASSOCIATION_1_N'}]},official),/desconocida/);
+assert.throws(()=>normalizeProposal({classes:[{name:'A',attributes:[],methods:[]}],relations:[{sourceName:'A',targetName:'Paciente',type:'INVALID'}]},official),/no válido/);
+console.log('CU-16/17: referencias oficiales, cambios explícitos, multiplicidad, inmutabilidad y validación comprobados.');

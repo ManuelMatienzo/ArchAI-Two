@@ -32,6 +32,11 @@ public class ManejadorExcepcionesGlobal {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(respuesta);
     }
 
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public org.springframework.http.ResponseEntity<java.util.Map<String,String>> estadoHttp(org.springframework.web.server.ResponseStatusException ex) {
+        return org.springframework.http.ResponseEntity.status(ex.getStatusCode()).body(java.util.Map.of("mensaje", ex.getReason() == null ? "No se pudo completar la operación." : ex.getReason()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> manejarExcepcionGeneral(Exception ex) {
         Map<String, Object> respuesta = new HashMap<>();

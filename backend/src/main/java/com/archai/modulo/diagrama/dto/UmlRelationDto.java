@@ -6,7 +6,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UmlRelationDto {
+public class UmlRelationDto extends PropiedadesUmlDto {
     private String id;
     private String sourceClassId;
     private String targetClassId;

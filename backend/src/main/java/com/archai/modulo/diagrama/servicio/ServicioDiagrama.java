@@ -33,7 +33,7 @@ public class ServicioDiagrama {
     private final ComentarioDiagramaRepository comentarioDiagramaRepository;
     private final ProyectoRepository proyectoRepository;
     private final UsuarioRepository usuarioRepository;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public DiagramDto guardarDiagrama(DiagramDto dto) {
@@ -55,10 +55,17 @@ public class ServicioDiagrama {
         try {
             jsonPayload = objectMapper.writeValueAsString(dto);
         } catch (Exception e) {
-            jsonPayload = "{}";
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,"No se pudo convertir el diagrama para guardarlo. Tu diseño se conserva.");
         }
 
-        Optional<DiagramaEntity> existente = diagramaRepository.findById(id);
+        Optional<DiagramaEntity> existente = diagramaRepository.findForUpdate(id);
+        if(existente.isPresent()) {
+            try {
+                long revision=objectMapper.readTree(existente.get().getJsonDiagrama()).path("_reviewRevision").asLong(0);
+                long recibida=objectMapper.valueToTree(dto).path("_reviewRevision").asLong(0);
+                if(revision>recibida) throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,"El diagrama cambió. Recupera la versión actual antes de guardar.");
+            } catch(java.io.IOException ex) { throw new IllegalStateException("No se pudo recuperar la versión oficial.",ex); }
+        }
         DiagramaEntity entidad;
         if (existente.isPresent()) {
             entidad = existente.get();

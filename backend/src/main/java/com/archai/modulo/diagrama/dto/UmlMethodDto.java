@@ -7,10 +7,10 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UmlMethodDto {
+public class UmlMethodDto extends PropiedadesUmlDto {
     private String id;
     private String name;
     private String returnType;
     private String visibility;
-    private List<String> parameters;
+    private Object parameters;
 }

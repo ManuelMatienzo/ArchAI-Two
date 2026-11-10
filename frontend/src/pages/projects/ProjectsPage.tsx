@@ -25,7 +25,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { InformacionSesion } from '../../types/auth';
 import { ModeloDiagrama } from '../../types/uml';
-import { listarProyectos, crearProyecto, unirseProyectoPorCodigo, Proyecto } from '../../services/api';
+import { listarProyectos, listarDiagramas, crearProyecto, unirseProyectoPorCodigo, Proyecto } from '../../services/api';
+import { mergeProjectDiagrams, DiagramaResumen } from '../../services/projectDiagrams';
 import { obtenerDiagramaPorId } from '../../services/diagramasPredefinidos';
 import { GlassModal } from '../../components/glass/GlassModal';
 import { LeftNavRail } from '../../components/layout/LeftNavRail';
@@ -43,15 +44,7 @@ export interface ProjectsPageProps {
 
 export type PaginaGestorProyectosProps = ProjectsPageProps;
 
-interface DiagramaResumen {
-  id: string;
-  proyectoId: string;
-  titulo: string;
-  totalClases: number;
-  totalRelaciones: number;
-  actualizadoEn: string;
-  data?: ModeloDiagrama;
-}
+
 
 // CU-02 · El hub solo muestra proyectos reales del backend para la cuenta autenticada.
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({
@@ -274,29 +267,16 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     if (!usuarioActualId) return;
     let montado = true;
     listarProyectos(usuarioActualId)
-      .then(datos => {
-        if (!montado || !Array.isArray(datos)) return;
-        setProyectos(prev => {
-          return datos.map(p => {
-            const existente = prev.find(ep => ep.id === p.id);
-            const diagId = `diag-${p.id}`;
-            const diagTitulo = `Diagrama Principal - ${p.nombre}`;
-            const diagModelo = obtenerDiagramaPorId(diagId, diagTitulo, { nombre: p.nombre, descripcion: p.descripcion });
-            return {
-              ...p,
-              diagramas: existente?.diagramas || [
-                {
-                  id: diagId,
-                  proyectoId: p.id,
-                  titulo: diagTitulo,
-                  totalClases: diagModelo.classes.length,
-                  totalRelaciones: diagModelo.relations.length,
-                  actualizadoEn: 'Reciente'
-                }
-              ]
-            };
-          });
-        });
+      .then(async datos => {
+        if(!Array.isArray(datos)) return;
+        const remote=await Promise.allSettled(datos.map(p=>listarDiagramas(p.id)));
+        if(montado)setProyectos(prev=>datos.map((p,index)=>{
+          const existing=prev.find(ep=>ep.id===p.id);
+          const response=remote[index];
+          return {...p,diagramas:response.status==='fulfilled'
+            ? mergeProjectDiagrams(p.id,response.value,existing?.diagramas)
+            : existing?.diagramas || []};
+        }));
       })
       .catch(() => {});
     return () => {
@@ -455,11 +435,19 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     setUnirseError(null);
     try {
       const proyecto = await unirseProyectoPorCodigo(codigo, session.currentUser.id);
-      setProyectos(prev => (
-        prev.some(p => p.id === proyecto.id)
-          ? prev
-          : [{ ...proyecto, diagramas: [] }, ...prev]
-      ));
+      const [diagramas] = await Promise.allSettled([listarDiagramas(proyecto.id)]);
+      setProyectos(prev => {
+        const existente = prev.find(p => p.id === proyecto.id);
+        const actualizado = {
+          ...proyecto,
+          diagramas: diagramas.status === 'fulfilled'
+            ? mergeProjectDiagrams(proyecto.id, diagramas.value, existente?.diagramas)
+            : existente?.diagramas || []
+        };
+        return existente
+          ? prev.map(p => p.id === proyecto.id ? actualizado : p)
+          : [actualizado, ...prev];
+      });
       setModalUnirseProyecto(false);
       setCodigoProyecto('');
       notificar(`Te uniste al proyecto "${proyecto.nombre}".`);
@@ -1295,7 +1283,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
                         >
                           {/* Clic en título abre el estudio con su arquitectura de dominio dedicada */}
                           <div
-                            onClick={() => onOpenStudio(obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion }), diag.titulo, diag.id)}
+                            onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id)}
                             style={{
                               display: 'flex',
                               alignItems: 'center',
@@ -1370,7 +1358,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
                               <Trash2 size={11} />
                             </button>
                             <button
-                              onClick={() => onOpenStudio(obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion }), diag.titulo, diag.id)}
+                              onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id)}
                               style={{
                                 background: 'transparent',
                                 border: 'none',
@@ -1409,7 +1397,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
                     const primerDiag = proyecto.diagramas?.[0];
                     const diagId = primerDiag?.id || `diag-${proyecto.id}`;
                     const diagTitulo = primerDiag?.titulo || proyecto.nombre;
-                    onOpenStudio(obtenerDiagramaPorId(diagId, diagTitulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion }), diagTitulo, diagId);
+                    onOpenStudio(primerDiag?.data || obtenerDiagramaPorId(diagId, diagTitulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion }), diagTitulo, diagId);
                   }}
                   style={{
                     flex: 1,

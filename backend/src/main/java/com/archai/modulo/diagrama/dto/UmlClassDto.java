@@ -7,7 +7,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UmlClassDto {
+public class UmlClassDto extends PropiedadesUmlDto {
     private String id;
     private String name;
     private String stereotype;

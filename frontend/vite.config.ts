@@ -1,8 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import mkcert from 'vite-plugin-mkcert'
+import { geminiEnvConfig } from './geminiEnvConfig.mjs'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  define: geminiEnvConfig(mode),
   plugins: [
     react(),
     // Certificado local de confianza que también cubre el host de presentación
@@ -34,4 +36,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

@@ -620,7 +620,9 @@ export function esClaseAsociativaUniversal(c: ClaseUml, allRelations: RelacionUm
   }
   return CATALOGO_DOMINIOS.some(d => {
     const interName = d.generarNombreIntermedia('', '').toLowerCase();
-    return nLow === interName || nLow.includes(interName) || interName.includes(nLow);
+    // A short domain name (Cita, Reserva, Cuenta...) is not evidence of an association class.
+    // Keep existing catalog matches, but never classify a class just because a longer catalog name contains it.
+    return nLow === interName || nLow.includes(interName);
   });
 }
 

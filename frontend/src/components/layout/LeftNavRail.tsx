@@ -5,7 +5,8 @@ import {
   Settings, 
   Boxes,
   LogOut,
-  FolderKanban
+  FolderKanban,
+  Bot
 } from 'lucide-react';
 import { PerfilUsuario } from '../../types/auth';
 
@@ -18,6 +19,8 @@ export interface LeftNavRailProps {
   onLogout?: () => void;
   onOpenProjects?: () => void;
   onOpenStudio?: () => void;
+  onToggleAssistant?: () => void;
+  assistantOpen?: boolean;
 }
 
 export const LeftNavRail: React.FC<LeftNavRailProps> = ({
@@ -26,7 +29,9 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
   currentUser,
   onLogout,
   onOpenProjects,
-  onOpenStudio
+  onOpenStudio,
+  onToggleAssistant,
+  assistantOpen = false
 }) => {
   const user = currentUser || {
     id: 'usr-default',
@@ -183,6 +188,17 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
           <Users size={18} />
         </button>
 
+        {onToggleAssistant && <button
+          onClick={onToggleAssistant}
+          title="@ArchAI · Propuestas del equipo"
+          aria-label="Abrir propuestas de ArchAI"
+          aria-expanded={assistantOpen}
+          style={{width:38,height:38,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',transition:'all 0.2s ease',
+            border:assistantOpen?'1px solid color-mix(in srgb, var(--glass-accent) 55%, transparent)':'1px solid transparent',
+            background:assistantOpen?'color-mix(in srgb, var(--glass-accent) 22%, transparent)':'transparent',
+            color:assistantOpen?'var(--accent-primary)':'var(--text-secondary)',
+            boxShadow:assistantOpen?'0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)':'none'}}
+        ><Bot size={18}/></button>}
         {/* Configuración */}
         <button
           onClick={() => onSelectTab && onSelectTab('settings')}

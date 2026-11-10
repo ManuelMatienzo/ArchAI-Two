@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+const {outputFiles}=await build({entryPoints:['src/services/projectDiagrams.ts'],bundle:true,write:false,format:'esm',platform:'node',define:{'import.meta.env':'{}'}});
+const {mergeProjectDiagrams}=await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`);
+const actual={id:'diagram-real',title:'Clínica',classes:[{id:'paciente',name:'Paciente',attributes:[],methods:[]}],relations:[]};
+const provisional={id:'diag-project',proyectoId:'project',titulo:'Diagrama principal',totalClases:6,totalRelaciones:0,actualizadoEn:'Reciente'};
+const unsaved={...provisional,id:'local-new',data:{title:'Local',classes:[],relations:[],updatedAt:''}};
+const merged=mergeProjectDiagrams('project',[actual],[provisional,unsaved]);
+assert.deepEqual(merged.map(d=>d.id),['diagram-real','local-new']);
+assert.equal(merged[0].totalClases,1);
+assert.equal(merged[0].data.classes[0].name,'Paciente');
+assert.equal(merged[1].data,unsaved.data,'Se conserva el trabajo local sin guardar');
+assert.deepEqual(mergeProjectDiagrams('project',[],[provisional]),[],'No inventa diagramas cuando el servidor no devuelve ninguno');
+assert.equal(mergeProjectDiagrams('project',[actual],[{...unsaved,id:'diagram-real'}]).length,1);
+console.log('Hub: ID y contenido reales, sin diagramas inventados; borradores locales conservados.');

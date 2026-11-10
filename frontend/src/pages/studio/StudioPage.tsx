@@ -36,6 +36,9 @@ import {
 import { calcularMadurezProyecto } from '../../services/softwareMaturity';
 import { generarMetodosSugeridos } from '../../services/projectBrainService';
 import { ClienteStomp } from '../../services/stompClient';
+import { useProposalReview } from '../../components/collaboration/useProposalReview';
+import { ProposalToolbar } from '../../components/collaboration/ProposalReviewEditor';
+import { ProposalPanel, useProposals } from '../../components/collaboration/ProposalPanel';
 import { generateXmiXml } from '../../services/codeGenerator';
 import { exportarXmiEnterpriseArchitect } from '../../services/exportarXmiEA';
 import { normalizarDiagrama } from '../../services/agenteDiagrama';
@@ -410,7 +413,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     setDiagram(prev => {
       const rawNext = typeof updater === 'function' ? updater(prev) : updater;
       if (rawNext === prev) return prev;
-      const next = sanitizarDiagramaUML25(rawNext);
+      const next = sanitizarDiagramaUML25({...rawNext,...((prev as any)._reviewRevision!==undefined?{_reviewRevision:(prev as any)._reviewRevision}:{})});
 
       if (recordHistory) {
         const prevSerialized = serializeForDiff(prev);
@@ -629,6 +632,24 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   );
   // CU-03: bandera para NO golpear la nube con guardados durante un arrastre en curso (solo al soltar)
   const arrastreEnCursoRef = useRef<boolean>(false);
+  const proposals = useProposals(currentSession, diagram, estadoColab === 'conectado',
+    (type, data) => stompRef.current?.publicar(type,data), `${currentSession.currentUser.id}#${miInstanciaIdRef.current}`, diagramId);
+  const review = useProposalReview(currentSession.roomId, diagramId, estadoColab === 'conectado', diagram, (next,previous) => {
+    if(previous && serializeForDiff(previous)!==serializeForDiff(next)) {
+      const top=undoStackRef.current[undoStackRef.current.length-1];
+      if(!top || serializeForDiff(top)!==serializeForDiff(previous)) {
+        undoStackRef.current.push(previous);redoStackRef.current=[];setHistoryTick(t=>t+1);
+      }
+    }
+    if (JSON.stringify(diagramRef.current) === JSON.stringify(next)) return;
+    esActualizacionRemotaRef.current = true;
+    diagramRef.current = next;
+    setDiagram(next);
+  });
+  const reviewRef = useRef(review); reviewRef.current = review;
+  const [connectionAttempt,setConnectionAttempt] = useState(0);
+  const proposalsRef = useRef(proposals);
+  proposalsRef.current = proposals;
 
   // Espejo del diagrama para comparar cambios sin reintroducir dependencias circulares
   useEffect(() => { diagramRef.current = diagram; }, [diagram]);
@@ -638,6 +659,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     const habitacionId = currentSession.roomId;
     if (!habitacionId) return;
     let activo = true;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
     const emisorIdInstancia = `${currentSession.currentUser.id}#${miInstanciaIdRef.current}`;
 
@@ -649,9 +671,12 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         if (!activo) return;
         const tipo = payload?.tipo;
         const emisorId = payload?.emisorId;
+        if (tipo === 'ia_review_conflict') { reviewRef.current.setError(payload.payload?.message || 'El diagrama cambió. Revisa la versión actual.'); return; }
+        if (tipo === 'ia_draft_state') { reviewRef.current.receive(payload.payload); return; }
+        if (tipo?.startsWith('ia_')) { proposalsRef.current.receive(payload); return; }
 
         // Ignorar únicamente ecos de esta misma pestaña
-        if (emisorId === emisorIdInstancia) return;
+        if (emisorId === emisorIdInstancia && tipo !== 'diagrama') return;
 
         // 1. Detección de nuevo participante en la sala
         if (tipo === 'join' || tipo === 'solicitar_diagrama') {
@@ -668,7 +693,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           }
 
           // Si tenemos el diagrama o somos anfitrión, enviarlo de inmediato para sincronizar al recién llegado
-          if (currentSession.currentUser.isHost || (diagramRef.current.classes && diagramRef.current.classes.length > 0)) {
+          if (!reviewRef.current.snapshot && (currentSession.currentUser.isHost || (diagramRef.current.classes && diagramRef.current.classes.length > 0))) {
             setTimeout(() => {
               if (stompRef.current?.estaConectado()) {
                 stompRef.current.publicar('diagrama', construirPayloadDiagrama(diagramRef.current));
@@ -757,7 +782,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             esActualizacionRemotaRef.current = true;
             ultimaAplicacionRemotaRef.current = Date.now();
             diagramRef.current = remoto;
-            setDiagram(remoto);
+            if (emisorId === 'sistema-revision') handleUpdateDiagram(remoto); else setDiagram(remoto);
           } catch {
             /* frame inválido: se ignora */
           }
@@ -766,7 +791,10 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       (estado) => {
         if (!activo) return;
         if (estado.includes('Conectado')) setEstadoColab('conectado');
-        else if (estado.includes('Error') || estado.includes('sin conexión') || estado.includes('Desconectado')) setEstadoColab('simulado');
+        else if (estado.includes('Error') || estado.includes('sin conexión') || estado.includes('Desconectado')) {
+          setEstadoColab('simulado');
+          if (!reconnectTimer) reconnectTimer=setTimeout(()=>{if(activo)setConnectionAttempt(n=>n+1);},Math.min(15000,1000*Math.pow(2,Math.min(connectionAttempt,4))));
+        }
         else setEstadoColab('conectando');
       }
     );
@@ -812,11 +840,12 @@ export const StudioPage: React.FC<StudioPageProps> = ({
 
     return () => {
       activo = false;
+      if(reconnectTimer)clearTimeout(reconnectTimer);
       stompRef.current?.disconnect();
       stompRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSession.roomId]);
+  }, [currentSession.roomId, connectionAttempt]);
 
   // Difunde los cambios locales del diagrama por STOMP con Trailing Debounce ultrarrápido (60ms)
   useEffect(() => {
@@ -1353,7 +1382,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       return;
     }
     try {
-      const guardado = await guardarDiagramaEnNube(diagram, undefined, currentSession.currentUser.id);
+      const guardado = await guardarDiagramaEnNube(diagram, undefined, currentSession.currentUser.id, diagramId);
       const id = guardado?.id;
       if (id) {
         setGuardadoEn(id);
@@ -1466,7 +1495,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     try {
       let idDiagrama = guardadoEn;
       if (!idDiagrama) {
-        const guardado = await guardarDiagramaEnNube(diagram, undefined, currentSession.currentUser.id);
+        const guardado = await guardarDiagramaEnNube(diagram, undefined, currentSession.currentUser.id, diagramId);
         idDiagrama = guardado?.id;
         if (idDiagrama) {
           setGuardadoEn(idDiagrama);
@@ -1528,6 +1557,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       {/* 1. Barra Lateral de Navegación */}
       <BarraLateralNavegacion
         activeTab={activeRailTab}
+        assistantOpen={proposals.open}
+        onToggleAssistant={() => {setActiveRailTab('canvas');proposals.setOpen(!proposals.open);}}
         onSelectTab={handleSelectRailTab}
         currentUser={currentSession.currentUser}
         onLogout={onLogout}
@@ -1645,6 +1676,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             <>
           <LienzoInteractivoStudio
             diagram={diagram}
+            proposalDraft={!review.hidden ? review.active?.diagram : undefined}
+            onDraftMove={review.canModerate && !review.busy ? (id,pos)=>{void review.move(id,pos);} : undefined}
+            onInspectDraft={id=>{review.setInspected(id);proposals.setOpen(true);}}
             session={currentSession}
             selectedClassId={selectedClassId}
             onSelectClass={setSelectedClassId}
@@ -1667,7 +1701,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             onOpenWhiteboard={() => setShowWhiteboardModal(true)}
             onToggleAiAssistant={() => setIsAiAssistantOpen(prev => !prev)}
             isAiAssistantOpen={isAiAssistantOpen}
-            userPermissions={userPermissions}
+            userPermissions={review.snapshot && !review.canModerate ? {...userPermissions,canEditDiagram:false,canConnectRelations:false} : userPermissions}
             userRole={currentRole}
             onAutoCompletarClase={handleAutoCompletarClase}
             onUndo={handleUndo}
@@ -1696,6 +1730,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             onNotificar={(texto, tipo = 'ok') => setSaveInfo({ tipo, texto })}
           />
 
+          {/* Asesor colaborativo CU-15; conserva el asistente de comandos existente. */}
+          <ProposalPanel state={proposals} host={currentSession.currentUser.isHost} review={review}/>
+          <ProposalToolbar review={review} onInspect={()=>proposals.setOpen(true)}/>
           {/* 5. Asistente de IA Flotante (NLP y Comandos por Voz) */}
           {isAiAssistantOpen && (
             <AsistenteIaFlotante
