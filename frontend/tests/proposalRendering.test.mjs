@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+const bundle=await build({entryPoints:['src/services/semanticDomainEngine.ts'],bundle:true,write:false,format:'esm',platform:'node'});
+const {esClaseAsociativaUniversal,sanitizarDiagramaUML25}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const patient={id:'patient',name:'Paciente',stereotype:'Entity',attributes:[],methods:[]};
+const appointment={id:'appointment',name:'Cita',stereotype:'Entity',attributes:[{id:'pk',name:'id',type:'Long',visibility:'+',isPrimaryKey:true}],methods:[]};
+const relation={id:'patient-appointment',sourceClassId:patient.id,targetClassId:appointment.id,type:'ASSOCIATION_1_N',sourceMultiplicity:'1',targetMultiplicity:'0..*'};
+const diagram={title:'Clínica',updatedAt:'',classes:[patient,appointment],relations:[relation]};
+const before=JSON.stringify(diagram);
+assert.equal(esClaseAsociativaUniversal(appointment,diagram.relations),false,'Cita no es asociativa solo por estar contenida en CitaMedica');
+const official=sanitizarDiagramaUML25(diagram);
+assert.equal(official.relations.length,1,'La relación propuesta debe conservarse al renderizar y al aprobar');
+assert.equal(official.classes.find(c=>c.id===appointment.id).attributes[0].isPrimaryKey,true,'La aprobación conserva la clave primaria');
+assert.equal(JSON.stringify(diagram),before,'La validación no muta el borrador original');
+assert.equal(esClaseAsociativaUniversal({...appointment,stereotype:'AssociationClass'},[]),true,'Se conserva la clasificación UML explícita');
+assert.equal(esClaseAsociativaUniversal(appointment,[{...relation,associationClassId:appointment.id}]),true,'Se conserva la asociación explícita desde una relación');
+assert.equal(esClaseAsociativaUniversal({...appointment,name:'DetalleVenta'},[]),true,'Se conserva la detección anterior de detalles');
+console.log('CU-16/17: Cita conserva su relación 1:N y PK; se mantienen las clases asociativas explícitas y los detalles.');

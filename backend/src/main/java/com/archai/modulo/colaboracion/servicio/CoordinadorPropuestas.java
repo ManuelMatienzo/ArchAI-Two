@@ -25,7 +25,7 @@ public class CoordinadorPropuestas {
             long now = System.currentTimeMillis();
             String hash = String.valueOf(payload.get("hash"));
             if (!host || !e.enabled || now < e.until || now-e.last < 30000 || hash.equals(e.hash)) return null;
-            e.last = now; e.until = now+70000; e.hash = hash; e.owner = emisor; e.request = String.valueOf(payload.get("id"));
+            e.last = now; e.until = now+120000; e.hash = hash; e.owner = emisor; e.request = String.valueOf(payload.get("id"));
         }
         if ("ia_result".equals(tipo) && Boolean.TRUE.equals(payload.get("automatic"))) {
             if (!emisor.equals(e.owner) || !Objects.equals(payload.get("id"),e.request)) return null;

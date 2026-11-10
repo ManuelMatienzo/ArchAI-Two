@@ -40,28 +40,29 @@ const controller = new AbortController(); controller.abort();
 await assert.rejects(agent.suggest('Consulta',diagram,true,controller.signal));
 console.log('CU-15: prioridad local, contrato, cancelación, fallo local e inmutabilidad verificados.');
 console.log('Modelo local: selección explícita, preferencia Qwen3.5 y think:false verificados.');
-const configured = await build({entryPoints:['src/services/proposalAgent.ts'],bundle:true,write:false,format:'esm',platform:'node',define:{'import.meta.env':JSON.stringify({VITE_GEMINI_API_KEY:'test-only-not-a-real-key',VITE_GEMINI_MODEL:'test-model'})}});
-const configuredAgent = await import(`data:text/javascript;base64,${Buffer.from(configured.outputFiles[0].text).toString('base64')}`);
 const engineCalls=[];
-globalThis.fetch = async url => { engineCalls.push(url); throw new TypeError('offline'); };
-await assert.rejects(configuredAgent.suggest('Consulta',diagram,true,new AbortController().signal,'qwen3.5:4b','local'));
-assert.deepEqual(engineCalls,['/api/ollama/api/tags'],'Local nunca recurre a nube aunque exista una clave');
+globalThis.fetch = async url => {engineCalls.push(url); throw new TypeError('offline');};
+await assert.rejects(agent.suggest('Consulta',diagram,true,new AbortController().signal,'qwen3.5:4b','local'));
+assert.deepEqual(engineCalls,['/api/ollama/api/tags'],'Local nunca recurre a nube');
 engineCalls.length=0;
-globalThis.fetch = async url => {
+globalThis.fetch=async(url,options)=>{
   engineCalls.push(url);
-  return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify({clarification:'¿Qué clases necesitas?'})}]}}]}));
+  assert.deepEqual(JSON.parse(options.body),{provider:'claude'});
+  assert.equal(options.headers['x-api-key'],undefined);
+  return new Response(JSON.stringify({content:{clarification:'¿Qué clases necesitas?'},provider:'Claude',model:'claude-sonnet-5-5',durationMs:350,inputTokens:20,outputTokens:10}));
 };
-const cloudResult=await configuredAgent.suggest('Consulta',diagram,true,new AbortController().signal,'qwen3.5:4b','cloud');
-assert.equal(cloudResult.provider,'Nube'); assert.equal(cloudResult.model,'test-model');
-assert.equal(engineCalls.length,1); assert.match(engineCalls[0],/generativelanguage/);
-assert.equal(engineCalls.some(url=>url.includes('ollama')),false,'Nube no consulta al modelo local');
-console.log('Selector Local/Nube: rutas exclusivas comprobadas sin llamadas reales.');
-for (const [status,message] of [[429,/cuota/],[403,/permisos/],[404,/modelo/],[400,/formato/],[503,/temporalmente/]]) {
-  globalThis.fetch = async () => new Response('{}',{status});
-  await assert.rejects(configuredAgent.suggest('Consulta',diagram,true,new AbortController().signal,undefined,'cloud'),message);
-}
-globalThis.fetch=async()=>{throw new TypeError('network');};
-await assert.rejects(configuredAgent.suggest('Consulta',diagram,true,new AbortController().signal,undefined,'cloud'),/conexión/);
-globalThis.fetch=async()=>new Response(JSON.stringify({candidates:[{content:{parts:[]}}]}));
-await assert.rejects(configuredAgent.suggest('Consulta',diagram,true,new AbortController().signal,undefined,'cloud'),/sin texto/);
-console.log('Gemini: errores de cuota, permisos, modelo, formato, disponibilidad, red y respuesta vacía verificados.');
+const request={roomId:'ROOM',requestId:'req-1',options:{provider:'claude'}};
+const cloudResult=await agent.suggest('Consulta',diagram,true,new AbortController().signal,undefined,'cloud',request);
+assert.equal(cloudResult.provider,'Claude');assert.equal(cloudResult.model,'claude-sonnet-5-5');assert.equal(cloudResult.durationMs,350);
+assert.equal(engineCalls.length,1);assert.ok(engineCalls[0].endsWith('/colaboracion/salas/ROOM/inferencia/req-1'));
+assert.equal(engineCalls.some(url=>url.includes('ollama') || url.includes('anthropic.com') || url.includes('googleapis.com')),false);
+globalThis.fetch=async()=>new Response(JSON.stringify({mensaje:'Ambos proveedores no están disponibles.'}),{status:502});
+await assert.rejects(agent.suggest('Consulta',diagram,true,new AbortController().signal,undefined,'cloud',request),/Ambos proveedores/);
+await assert.rejects(agent.suggest('Consulta',diagram,true,new AbortController().signal,undefined,'cloud'),/sala no confirmó/);
+console.log('Nube: gateway autenticado, proveedor real, metadatos y errores; sin claves ni llamadas directas a proveedores.');
+
+// El esquema del gateway exige clarification aunque no se necesite: vacío no es una aclaración.
+globalThis.fetch=async()=>new Response(JSON.stringify({content:{explanation:'Nueva clase Cita.',clarification:'',skip:false,classes:[{name:'Cita',attributes:[],methods:[]}],relations:[]},provider:'Claude',model:'claude-sonnet-5-5'}));
+const structured=await agent.suggest('Propón Cita',diagram,true,new AbortController().signal,undefined,'cloud',request);
+assert.equal(structured.status,'ready');assert.equal(structured.explanation,'Nueva clase Cita.');assert.equal(structured.diagram.classes[0].name,'Cita');
+console.log('Una aclaración vacía no oculta una propuesta válida en el chat.');

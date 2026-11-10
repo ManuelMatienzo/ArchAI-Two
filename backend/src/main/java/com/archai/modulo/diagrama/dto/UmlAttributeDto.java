@@ -7,7 +7,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UmlAttributeDto {
+public class UmlAttributeDto extends PropiedadesUmlDto {
     private String id;
     private String name;
     private String type;

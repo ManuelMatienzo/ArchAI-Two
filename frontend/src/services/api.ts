@@ -82,15 +82,18 @@ export function apiUrl(path: string): string {
 
 export function construirPayloadDiagrama(diagram: ModeloDiagrama, extra?: { proyectoId?: string; creadorId?: string }): any {
   return {
+    ...(diagram as any),
     proyectoId: extra?.proyectoId,
     creadorId: extra?.creadorId,
     title: diagram.title,
     classes: (diagram.classes || []).map(c => ({
+      ...c,
       id: c.id,
       name: c.name,
       stereotype: c.stereotype,
       position: c.position || { x: 200, y: 160 },
       attributes: (c.attributes || []).map(a => ({
+        ...a,
         id: a.id,
         name: a.name,
         type: a.type,
@@ -99,6 +102,7 @@ export function construirPayloadDiagrama(diagram: ModeloDiagrama, extra?: { proy
         isNullable: a.isNullable ?? true
       })),
       methods: (c.methods || []).map(m => ({
+        ...m,
         id: m.id,
         name: m.name,
         returnType: m.returnType,
@@ -107,6 +111,7 @@ export function construirPayloadDiagrama(diagram: ModeloDiagrama, extra?: { proy
       }))
     })),
     relations: (diagram.relations || []).map(r => ({
+      ...r,
       id: r.id,
       sourceClassId: r.sourceClassId,
       targetClassId: r.targetClassId,
@@ -119,14 +124,17 @@ export function construirPayloadDiagrama(diagram: ModeloDiagrama, extra?: { proy
 
 export function diagramaDesdeBackend(dto: any): ModeloDiagrama {
   return {
+    ...dto,
     title: dto?.title || 'Diagrama importado',
     updatedAt: dto?.updatedAt || new Date().toISOString(),
     classes: (dto?.classes || []).map((c: any) => ({
+      ...c,
       id: c.id,
       name: c.name || 'Clase',
       stereotype: c.stereotype || 'Entity',
       position: c.position,
       attributes: (c.attributes || []).map((a: any) => ({
+        ...a,
         id: a.id || `attr-${Math.random().toString(36).slice(2, 8)}`,
         name: a.name || 'campo',
         type: a.type || 'String',
@@ -135,6 +143,7 @@ export function diagramaDesdeBackend(dto: any): ModeloDiagrama {
         isNullable: a.isNullable ?? true
       })),
       methods: (c.methods || []).map((m: any) => ({
+        ...m,
         id: m.id || `met-${Math.random().toString(36).slice(2, 8)}`,
         name: m.name || 'operacion',
         returnType: m.returnType || 'void',
@@ -143,6 +152,7 @@ export function diagramaDesdeBackend(dto: any): ModeloDiagrama {
       }))
     })),
     relations: (dto?.relations || []).map((r: any) => ({
+      ...r,
       id: r.id,
       sourceClassId: r.sourceClassId,
       targetClassId: r.targetClassId,
@@ -258,10 +268,10 @@ export interface VersionDiagrama {
   autorNombre?: string;
 }
 
-export function guardarDiagramaEnNube(diagram: ModeloDiagrama, proyectoId?: string, creadorId?: string): Promise<any> {
+export function guardarDiagramaEnNube(diagram: ModeloDiagrama, proyectoId?: string, creadorId?: string, diagramaId?: string): Promise<any> {
   return apiFetch<any>('/api/v1/diagramas', {
     method: 'POST',
-    body: JSON.stringify(construirPayloadDiagrama(diagram, { proyectoId, creadorId }))
+    body: JSON.stringify({...construirPayloadDiagrama(diagram, { proyectoId, creadorId }), id:diagramaId || (diagram as any).id})
   });
 }
 

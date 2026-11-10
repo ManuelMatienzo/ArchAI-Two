@@ -25,6 +25,7 @@ export interface RelationPathData {
 }
 
 interface RelationLayerProps {
+  draftIds?: Set<string>;
   paths: RelationPathData[];
   selectedRelationId: string | null;
   hoveredRelationId: string | null;
@@ -96,6 +97,7 @@ function relationDefaults(r: RelationPathData) {
  * Refactor 2026-09-26 · Fase 1 (legibilidad + rendimiento) · sin cambios de lógica.
  */
 export const RelationLayer: React.FC<RelationLayerProps> = React.memo(function RelationLayer({
+  draftIds,
   paths,
   selectedRelationId,
   hoveredRelationId,
@@ -112,8 +114,8 @@ export const RelationLayer: React.FC<RelationLayerProps> = React.memo(function R
 
         const { markerEnd, strokeDash, strokeColor } = relationDefaults(r);
 
-        const isHovered = hoveredRelationId === r.id;
-        const isSelected = selectedRelationId === r.id;
+        const isHovered = !draftIds?.has(r.id) && hoveredRelationId === r.id;
+        const isSelected = !draftIds?.has(r.id) && selectedRelationId === r.id;
         const isHighlighted = isHovered || isSelected;
         const activeStrokeColor = isSelected ? '#f43f5e' : isHovered ? '#38bdf8' : strokeColor;
 
@@ -133,7 +135,7 @@ export const RelationLayer: React.FC<RelationLayerProps> = React.memo(function R
         return (
           <g
             key={r.id}
-            className="uml-relation-interactive"
+            className={`uml-relation-interactive ${draftIds?.has(r.id) ? 'proposal-ghost-relation' : ''}`}
             style={{ cursor: 'pointer' }}
             onMouseDown={selectHandlers.onMouseDown}
             onClick={selectHandlers.onClick}

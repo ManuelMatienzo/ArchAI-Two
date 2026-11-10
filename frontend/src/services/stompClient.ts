@@ -43,7 +43,8 @@ export class ClienteStomp {
 
       ws.onopen = () => {
         this.notificar('Conectando al broker STOMP...');
-        this.enviarFrame('CONNECT', { 'accept-version': '1.2', host: 'archai' }, '');
+        const token = localStorage.getItem('archai_token');
+        this.enviarFrame('CONNECT', { 'accept-version': '1.2', host: 'archai', ...(token ? {Authorization:`Bearer ${token}`} : {}) }, '');
       };
 
       ws.onmessage = (evento) => {

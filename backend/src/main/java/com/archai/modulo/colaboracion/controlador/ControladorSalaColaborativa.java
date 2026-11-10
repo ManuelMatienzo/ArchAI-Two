@@ -20,6 +20,7 @@ import java.util.List;
 public class ControladorSalaColaborativa {
 
     private final ServicioSalaColaborativa servicioSalaColaborativa;
+    private final com.archai.modulo.colaboracion.servicio.ServicioRevisionPropuesta revisiones;
 
     /** CU-03 · Paso 1: el anfitrión crea la sala y recibe el PIN. */
     @PostMapping({"/salas", "/rooms", "/crear-sala"})
@@ -54,8 +55,8 @@ public class ControladorSalaColaborativa {
 
     /** CU-03 · Actualizar o fijar el diagrama activo de la sala. */
     @PutMapping({"/salas/{pin}/diagrama", "/rooms/{pin}/diagram"})
-    public ResponseEntity<Void> actualizarDiagramaSala(@PathVariable String pin, @RequestBody Object diagrama) {
-        servicioSalaColaborativa.actualizarDiagramaDeSala(pin, diagrama);
+    public ResponseEntity<Void> actualizarDiagramaSala(@PathVariable String pin, @RequestBody Object diagrama, @RequestHeader(value="Authorization",required=false) String auth) {
+        revisiones.actualizarOficialConToken(pin, diagrama, auth);
         return ResponseEntity.ok().build();
     }
 }
