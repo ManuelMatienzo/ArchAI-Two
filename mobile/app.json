@@ -13,6 +13,7 @@
       "bundleIdentifier": "com.archai.mobile"
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#000020"
       },
@@ -26,7 +27,6 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/notification-icon.png",
           "color": "#38bdf8"
         }
       ]

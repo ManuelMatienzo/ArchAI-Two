@@ -19,12 +19,13 @@ import {
   Edit3,
   Check,
   Upload,
-  FileJson
+  FileJson,
+  KeyRound
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { InformacionSesion } from '../../types/auth';
 import { ModeloDiagrama } from '../../types/uml';
-import { listarProyectos, crearProyecto, Proyecto } from '../../services/api';
+import { listarProyectos, crearProyecto, unirseProyectoPorCodigo, Proyecto } from '../../services/api';
 import { obtenerDiagramaPorId } from '../../services/diagramasPredefinidos';
 import { GlassModal } from '../../components/glass/GlassModal';
 import { LeftNavRail } from '../../components/layout/LeftNavRail';
@@ -52,78 +53,7 @@ interface DiagramaResumen {
   data?: ModeloDiagrama;
 }
 
-// Proyectos iniciales de demostración con arquitectura real
-const PROYECTOS_PREDETERMINADOS: Array<Proyecto & { diagramas: DiagramaResumen[] }> = [
-  {
-    id: 'prj-ecommerce-01',
-    nombre: 'E-Commerce Enterprise Core',
-    descripcion: 'Arquitectura hexagonal con microservicios de pagos, catálogo, inventario y autenticación JWT.',
-    codigoAcceso: 'PRJ-ECOM-882',
-    iconoColor: '#e8c39e',
-    estado: 'ACTIVO',
-    propietarioNombre: 'Ing. Carlos Criado',
-    totalDiagramas: 2,
-    diagramas: [
-      {
-        id: 'diag-core-mvc',
-        proyectoId: 'prj-ecommerce-01',
-        titulo: 'Sistema de Comercio Electrónico v1.2',
-        totalClases: 4,
-        totalRelaciones: 3,
-        actualizadoEn: 'Hace 10 minutos'
-      },
-      {
-        id: 'diag-auth-jwt',
-        proyectoId: 'prj-ecommerce-01',
-        titulo: 'Módulo de Seguridad y RBAC',
-        totalClases: 3,
-        totalRelaciones: 2,
-        actualizadoEn: 'Ayer'
-      }
-    ]
-  },
-  {
-    id: 'prj-banking-02',
-    nombre: 'Plataforma Fintech & Billetera Digital',
-    descripcion: 'Transacciones financieras concurrentes con doble contabilidad, verificación 2FA y auditoría forense.',
-    codigoAcceso: 'PRJ-FIN-304',
-    iconoColor: '#2f2c79',
-    estado: 'ACTIVO',
-    propietarioNombre: 'Ing. Carlos Criado',
-    totalDiagramas: 1,
-    diagramas: [
-      {
-        id: 'diag-ledger-tx',
-        proyectoId: 'prj-banking-02',
-        titulo: 'Ledger Transaccional y Saldos',
-        totalClases: 5,
-        totalRelaciones: 4,
-        actualizadoEn: 'Hace 3 días'
-      }
-    ]
-  },
-  {
-    id: 'prj-iot-03',
-    nombre: 'Telemetría IoT y Dispositivos Médicos',
-    descripcion: 'Ingesta masiva de señales vitales en tiempo real, alarmas HL7/FHIR y orquestación con IA clínica.',
-    codigoAcceso: 'PRJ-IOT-915',
-    iconoColor: '#8892b0',
-    estado: 'EN_PROGRESO',
-    propietarioNombre: 'Equipo ArchAI',
-    totalDiagramas: 1,
-    diagramas: [
-      {
-        id: 'diag-telemetria',
-        proyectoId: 'prj-iot-03',
-        titulo: 'Monitorización de Sensores ICU',
-        totalClases: 3,
-        totalRelaciones: 2,
-        actualizadoEn: 'Hace 1 semana'
-      }
-    ]
-  }
-];
-
+// CU-02 · El hub solo muestra proyectos reales del backend para la cuenta autenticada.
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   session: propSession,
   onLogout: propOnLogout,
@@ -208,10 +138,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   };
   const [proyectos, setProyectos] = useState<Array<Proyecto & { diagramas?: DiagramaResumen[] }>>(() => {
     try {
-      const guardado = localStorage.getItem('archai_proyectos_locales');
+      // Caché aislada por cuenta: una sesión nunca lee los proyectos de otra.
+      const clave = `archai_proyectos_locales_${session.currentUser?.id || 'anon'}`;
+      const guardado = localStorage.getItem(clave);
       if (guardado) return JSON.parse(guardado);
     } catch {}
-    return PROYECTOS_PREDETERMINADOS;
+    return [];
   });
 
   const [busqueda, setBusqueda] = useState('');
@@ -219,6 +151,10 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   
   // Modales
   const [modalNuevoProyecto, setModalNuevoProyecto] = useState(false);
+  const [modalUnirseProyecto, setModalUnirseProyecto] = useState(false);
+  const [codigoProyecto, setCodigoProyecto] = useState('');
+  const [unirseError, setUnirseError] = useState<string | null>(null);
+  const [uniendose, setUniendose] = useState(false);
   const [modalNuevoDiagrama, setModalNuevoDiagrama] = useState<string | null>(null);
   const [modalEditarProyecto, setModalEditarProyecto] = useState<Proyecto | null>(null);
   const [modalEditarDiagrama, setModalEditarDiagrama] = useState<{ proyectoId: string; diagrama: DiagramaResumen } | null>(null);
@@ -239,6 +175,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const [editTituloDiagrama, setEditTituloDiagrama] = useState('');
 
   const [cargando, setCargando] = useState(false);
+  const [errorNuevoProyecto, setErrorNuevoProyecto] = useState<string | null>(null);
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
 
   // Tema
@@ -331,47 +268,49 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     accentShadow: '0 0 16px rgba(232, 195, 158, 0.35)'
   }), [isDark]);
 
-  // Cargar proyectos desde el backend si está disponible
+  // CU-02 · Cargar solo los proyectos de la cuenta autenticada (propietario o miembro)
+  const usuarioActualId = session.currentUser?.id;
   useEffect(() => {
+    if (!usuarioActualId) return;
     let montado = true;
-    listarProyectos()
+    listarProyectos(usuarioActualId)
       .then(datos => {
-        if (montado && Array.isArray(datos) && datos.length > 0) {
-          setProyectos(prev => {
-            return datos.map(p => {
-              const existente = prev.find(ep => ep.id === p.id);
-              const diagId = `diag-${p.id}`;
-              const diagTitulo = `Diagrama Principal - ${p.nombre}`;
-              const diagModelo = obtenerDiagramaPorId(diagId, diagTitulo, { nombre: p.nombre, descripcion: p.descripcion });
-              return {
-                ...p,
-                diagramas: existente?.diagramas || [
-                  {
-                    id: diagId,
-                    proyectoId: p.id,
-                    titulo: diagTitulo,
-                    totalClases: diagModelo.classes.length,
-                    totalRelaciones: diagModelo.relations.length,
-                    actualizadoEn: 'Reciente'
-                  }
-                ]
-              };
-            });
+        if (!montado || !Array.isArray(datos)) return;
+        setProyectos(prev => {
+          return datos.map(p => {
+            const existente = prev.find(ep => ep.id === p.id);
+            const diagId = `diag-${p.id}`;
+            const diagTitulo = `Diagrama Principal - ${p.nombre}`;
+            const diagModelo = obtenerDiagramaPorId(diagId, diagTitulo, { nombre: p.nombre, descripcion: p.descripcion });
+            return {
+              ...p,
+              diagramas: existente?.diagramas || [
+                {
+                  id: diagId,
+                  proyectoId: p.id,
+                  titulo: diagTitulo,
+                  totalClases: diagModelo.classes.length,
+                  totalRelaciones: diagModelo.relations.length,
+                  actualizadoEn: 'Reciente'
+                }
+              ]
+            };
           });
-        }
+        });
       })
       .catch(() => {});
     return () => {
       montado = false;
     };
-  }, []);
+  }, [usuarioActualId]);
 
-  // Persistir en localStorage
+  // Persistir en localStorage (caché aislada por cuenta)
   useEffect(() => {
     try {
-      localStorage.setItem('archai_proyectos_locales', JSON.stringify(proyectos));
+      const clave = `archai_proyectos_locales_${usuarioActualId || 'anon'}`;
+      localStorage.setItem(clave, JSON.stringify(proyectos));
     } catch {}
-  }, [proyectos]);
+  }, [proyectos, usuarioActualId]);
 
   // Métricas globales
   const metricas = useMemo(() => {
@@ -465,49 +404,70 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
 
   const handleCrearProyecto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombreNuevoProyecto.trim()) return;
+    if (!nombreNuevoProyecto.trim() || cargando) return;
 
     setCargando(true);
-    const nuevoId = 'prj-' + Date.now();
-    const codigoAcceso = 'PRJ-' + Math.floor(1000 + Math.random() * 9000);
-
-    const nuevoPrj: Proyecto & { diagramas: DiagramaResumen[] } = {
-      id: nuevoId,
-      nombre: nombreNuevoProyecto.trim(),
-      descripcion: descNuevoProyecto.trim() || 'Proyecto de arquitectura de software y modelado UML.',
-      codigoAcceso,
-      iconoColor: colorNuevoProyecto,
-      estado: 'ACTIVO',
-      propietarioId: session.currentUser.id,
-      propietarioNombre: session.currentUser.name,
-      totalDiagramas: 1,
-      diagramas: [
-        {
-          id: `diag-${nuevoId}-1`,
-          proyectoId: nuevoId,
-          titulo: `Modelo Dominio - ${nombreNuevoProyecto.trim()}`,
-          totalClases: 2,
-          totalRelaciones: 1,
-          actualizadoEn: 'Recién creado'
-        }
-      ]
-    };
+    setErrorNuevoProyecto(null);
 
     try {
-      await crearProyecto({
-        nombre: nuevoPrj.nombre,
-        descripcion: nuevoPrj.descripcion,
-        iconoColor: nuevoPrj.iconoColor,
+      // CU-02 · El proyecto se crea en el backend y se usa su ID real (sin IDs locales falsos).
+      const creado = await crearProyecto({
+        nombre: nombreNuevoProyecto.trim(),
+        descripcion: descNuevoProyecto.trim() || 'Proyecto de arquitectura de software y modelado UML.',
+        iconoColor: colorNuevoProyecto,
         propietarioId: session.currentUser.id
       });
-    } catch {}
 
-    setProyectos(prev => [nuevoPrj, ...prev]);
-    setNombreNuevoProyecto('');
-    setDescNuevoProyecto('');
-    setModalNuevoProyecto(false);
-    setCargando(false);
-    notificar(`Proyecto "${nuevoPrj.nombre}" creado exitosamente.`);
+      const diagId = `diag-${creado.id}-1`;
+      const nuevoPrj: Proyecto & { diagramas: DiagramaResumen[] } = {
+        ...creado,
+        diagramas: [
+          {
+            id: diagId,
+            proyectoId: creado.id,
+            titulo: `Modelo Dominio - ${creado.nombre}`,
+            totalClases: 2,
+            totalRelaciones: 1,
+            actualizadoEn: 'Recién creado'
+          }
+        ]
+      };
+
+      setProyectos(prev => [nuevoPrj, ...prev]);
+      setNombreNuevoProyecto('');
+      setDescNuevoProyecto('');
+      setModalNuevoProyecto(false);
+      notificar(`Proyecto "${creado.nombre}" creado exitosamente.`);
+    } catch {
+      setErrorNuevoProyecto('No se pudo crear el proyecto. Intenta de nuevo más tarde.');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  /** CU-02 · Unirse a un proyecto compartido mediante su código de acceso. */
+  const handleUnirseProyecto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const codigo = codigoProyecto.trim().toUpperCase();
+    if (!codigo || uniendose) return;
+
+    setUniendose(true);
+    setUnirseError(null);
+    try {
+      const proyecto = await unirseProyectoPorCodigo(codigo, session.currentUser.id);
+      setProyectos(prev => (
+        prev.some(p => p.id === proyecto.id)
+          ? prev
+          : [{ ...proyecto, diagramas: [] }, ...prev]
+      ));
+      setModalUnirseProyecto(false);
+      setCodigoProyecto('');
+      notificar(`Te uniste al proyecto "${proyecto.nombre}".`);
+    } catch (err: any) {
+      setUnirseError(err?.message || 'No se pudo unir al proyecto. Verifica el código.');
+    } finally {
+      setUniendose(false);
+    }
   };
 
   // Abrir modal de edición de proyecto
@@ -831,9 +791,39 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
             <span>Importar (.archai.json)</span>
           </button>
 
+          {/* Botón Unirse con Código (invitados CU-02) */}
+          <button
+            onClick={() => {
+              setUnirseError(null);
+              setModalUnirseProyecto(true);
+            }}
+            className="btn-studio-glass"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              color: c.badgeText,
+              background: c.badgeBg,
+              border: `1px solid ${c.badgeBorder}`,
+              borderRadius: '7px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            title="Unirse a un proyecto compartido con su código de acceso"
+          >
+            <KeyRound size={14} color={c.badgeText} />
+            <span>Unirse con Código</span>
+          </button>
+
           {/* Botón Nuevo Proyecto */}
           <button
-            onClick={() => setModalNuevoProyecto(true)}
+            onClick={() => {
+                setErrorNuevoProyecto(null);
+                setModalNuevoProyecto(true);
+              }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1503,24 +1493,48 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
               No se encontraron proyectos
             </h3>
             <p style={{ fontSize: '0.78rem', color: c.textMuted, margin: '0 0 14px 0' }}>
-              Intenta con otra búsqueda o crea un nuevo proyecto de software.
+              Intenta con otra búsqueda, crea un nuevo proyecto o únete con un código compartido.
             </p>
-            <button
-              onClick={() => setModalNuevoProyecto(true)}
-              style={{
-                background: '#e8c39e',
-                color: '#000020',
-                border: 'none',
-                padding: '7px 16px',
-                borderRadius: '7px',
-                fontSize: '0.78rem',
-                fontWeight: 800,
-                cursor: 'pointer'
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => {
+                setErrorNuevoProyecto(null);
+                setModalNuevoProyecto(true);
               }}
-            >
-              <Plus size={13} style={{ marginRight: '5px', verticalAlign: 'middle' }} />
-              Crear Nuevo Proyecto
-            </button>
+                style={{
+                  background: '#e8c39e',
+                  color: '#000020',
+                  border: 'none',
+                  padding: '7px 16px',
+                  borderRadius: '7px',
+                  fontSize: '0.78rem',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                <Plus size={13} style={{ marginRight: '5px', verticalAlign: 'middle' }} />
+                Crear Nuevo Proyecto
+              </button>
+              <button
+                onClick={() => {
+                  setUnirseError(null);
+                  setModalUnirseProyecto(true);
+                }}
+                style={{
+                  background: c.btnGhostBg,
+                  color: c.btnGhostText,
+                  border: `1px solid ${c.btnGhostBorder}`,
+                  padding: '7px 16px',
+                  borderRadius: '7px',
+                  fontSize: '0.78rem',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                <KeyRound size={13} style={{ marginRight: '5px', verticalAlign: 'middle' }} />
+                Unirme con Código
+              </button>
+            </div>
           </div>
         )}
       </main>
@@ -1528,7 +1542,10 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
       {/* MODAL: Crear Nuevo Proyecto (CU-02) */}
       <GlassModal
         isOpen={modalNuevoProyecto}
-        onClose={() => setModalNuevoProyecto(false)}
+        onClose={() => {
+          setModalNuevoProyecto(false);
+          setErrorNuevoProyecto(null);
+        }}
         title="Crear Nuevo Proyecto"
         subtitle="Gestor de Espacios de Trabajo · CU-02"
         icon={<Plus size={18} />}
@@ -1610,10 +1627,28 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
             </div>
           </div>
 
+          {errorNuevoProyecto && (
+            <div style={{
+              marginBottom: '12px',
+              padding: '7px 10px',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              color: '#f87171',
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderRadius: '7px'
+            }}>
+              {errorNuevoProyecto}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
             <button
               type="button"
-              onClick={() => setModalNuevoProyecto(false)}
+              onClick={() => {
+                setModalNuevoProyecto(false);
+                setErrorNuevoProyecto(null);
+              }}
               style={{
                 padding: '7px 14px',
                 fontSize: '0.78rem',
@@ -1643,6 +1678,110 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
               }}
             >
               {cargando ? 'Guardando...' : 'Crear Proyecto'}
+            </button>
+          </div>
+        </form>
+      </GlassModal>
+
+      {/* MODAL: Unirse a un Proyecto con Código (CU-02 · invitados) */}
+      <GlassModal
+        isOpen={modalUnirseProyecto}
+        onClose={() => {
+          setModalUnirseProyecto(false);
+          setUnirseError(null);
+        }}
+        title="Unirse a un Proyecto"
+        subtitle="Acceso compartido por código · CU-02"
+        icon={<KeyRound size={18} />}
+        iconBg={isDark ? 'rgba(47, 44, 121, 0.60)' : '#171a4a'}
+        iconColor="#e8c39e"
+        maxWidth="420px"
+      >
+        <form onSubmit={handleUnirseProyecto}>
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: c.textPrimary, marginBottom: '5px' }}>
+              Código de acceso *
+            </label>
+            <input
+              type="text"
+              required
+              autoFocus
+              placeholder="ej. SISTEM-1071"
+              value={codigoProyecto}
+              onChange={e => setCodigoProyecto(e.target.value.toUpperCase())}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                fontSize: '0.86rem',
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                fontFamily: 'monospace',
+                textTransform: 'uppercase',
+                background: c.inputBg,
+                border: `1px solid ${c.inputBorder}`,
+                borderRadius: '7px',
+                color: c.inputText,
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+            />
+            <p style={{ fontSize: '0.70rem', color: c.textMuted, margin: '6px 0 0 0' }}>
+              Pídele al propietario el código del proyecto. Al unirte podrás abrirlo desde este hub.
+            </p>
+          </div>
+
+          {unirseError && (
+            <div style={{
+              marginBottom: '12px',
+              padding: '7px 10px',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              color: '#f87171',
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderRadius: '7px'
+            }}>
+              {unirseError}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setModalUnirseProyecto(false);
+                setUnirseError(null);
+              }}
+              style={{
+                padding: '7px 14px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: c.btnGhostText,
+                background: c.btnGhostBg,
+                border: `1px solid ${c.btnGhostBorder}`,
+                borderRadius: '7px',
+                cursor: 'pointer'
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={uniendose || !codigoProyecto.trim()}
+              style={{
+                padding: '7px 16px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                color: '#000020',
+                background: '#e8c39e',
+                border: 'none',
+                borderRadius: '7px',
+                cursor: uniendose ? 'wait' : 'pointer',
+                opacity: uniendose || !codigoProyecto.trim() ? 0.6 : 1,
+                boxShadow: '0 3px 10px rgba(232, 195, 158, 0.35)'
+              }}
+            >
+              {uniendose ? 'Uniéndose...' : 'Unirme al Proyecto'}
             </button>
           </div>
         </form>

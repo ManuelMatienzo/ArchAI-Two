@@ -44,6 +44,15 @@ public class ControladorColaboracion {
             }
         }
 
+        // CU-03 · Manejo de salida / abandono de sala
+        if ("leave".equalsIgnoreCase(mensaje.getTipo()) || "salir".equalsIgnoreCase(mensaje.getTipo())) {
+            try {
+                servicioSalaColaborativa.salirDeSala(salaId, mensaje.getEmisorId());
+                java.util.List<com.archai.modulo.autenticacion.dto.PerfilUsuarioDto> participantes = servicioSalaColaborativa.listarParticipantes(salaId);
+                messagingTemplate.convertAndSend("/topic/room/" + salaId + "/presence", participantes);
+            } catch (Exception ignored) {}
+        }
+
         // Retransmitir la acción a todos los suscriptores del canal STOMP
         messagingTemplate.convertAndSend("/topic/collab/" + salaId, mensaje);
     }

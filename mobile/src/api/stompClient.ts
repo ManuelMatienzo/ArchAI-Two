@@ -13,7 +13,7 @@ export class MobileStompClient {
   private client: Client | null = null;
   private status: StompConnectionStatus = 'desconectado';
   private subscriptions: Map<string, StompSubscription> = new Map();
-  private subscriptionCallbacks: Map<string, MessageCallback> = new Map();
+  private subscriptionCallbacks: Map<string, Set<MessageCallback>> = new Map();
   private statusListeners: Set<(status: StompConnectionStatus) => void> = new Set();
   private offlineQueue: QueuedMessage[] = [];
   private currentRoomId: string | null = null;
@@ -71,7 +71,7 @@ export class MobileStompClient {
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
       debug: (_str) => {
-        // En producción mantenemos los logs limpios
+        // Modo producción sin ruido de logs
       },
       onConnect: () => {
         this.notifyStatus('conectado');
@@ -94,7 +94,8 @@ export class MobileStompClient {
   private resubscribeAll() {
     if (!this.client || !this.client.connected) return;
 
-    this.subscriptionCallbacks.forEach((callback, dest) => {
+    this.subscriptionCallbacks.forEach((listeners, dest) => {
+      if (listeners.size === 0) return;
       try {
         const prevSub = this.subscriptions.get(dest);
         if (prevSub) {
@@ -102,11 +103,21 @@ export class MobileStompClient {
         }
 
         const sub = this.client!.subscribe(dest, (message: IMessage) => {
+          let payload: any;
           try {
-            const payload = JSON.parse(message.body);
-            callback(payload);
-          } catch (e) {
-            callback(message.body);
+            payload = JSON.parse(message.body);
+          } catch {
+            payload = message.body;
+          }
+          const currentListeners = this.subscriptionCallbacks.get(dest);
+          if (currentListeners) {
+            currentListeners.forEach((cb) => {
+              try {
+                cb(payload);
+              } catch (err) {
+                console.warn(`[STOMP] Error en callback de ${dest}:`, err);
+              }
+            });
           }
         });
         this.subscriptions.set(dest, sub);
@@ -133,36 +144,125 @@ export class MobileStompClient {
     });
   }
 
-  private genericSubscribe(dest: string, callback: MessageCallback) {
-    this.subscriptionCallbacks.set(dest, callback);
+  private genericSubscribe(dest: string, callback: MessageCallback): () => void {
+    if (!this.subscriptionCallbacks.has(dest)) {
+      this.subscriptionCallbacks.set(dest, new Set());
+    }
+    this.subscriptionCallbacks.get(dest)!.add(callback);
 
-    if (!this.client || !this.client.connected) {
-      return;
+    if (this.client && this.client.connected && !this.subscriptions.has(dest)) {
+      const sub = this.client.subscribe(dest, (message: IMessage) => {
+        let payload: any;
+        try {
+          payload = JSON.parse(message.body);
+        } catch {
+          payload = message.body;
+        }
+        const listeners = this.subscriptionCallbacks.get(dest);
+        if (listeners) {
+          listeners.forEach((cb) => {
+            try {
+              cb(payload);
+            } catch (err) {
+              console.warn(`[STOMP] Error en callback de ${dest}:`, err);
+            }
+          });
+        }
+      });
+      this.subscriptions.set(dest, sub);
     }
 
-    const prevSub = this.subscriptions.get(dest);
-    if (prevSub) {
-      try { prevSub.unsubscribe(); } catch {}
-    }
-
-    const sub = this.client.subscribe(dest, (message: IMessage) => {
-      try {
-        const payload = JSON.parse(message.body);
-        callback(payload);
-      } catch (e) {
-        callback(message.body);
+    return () => {
+      const listeners = this.subscriptionCallbacks.get(dest);
+      if (listeners) {
+        listeners.delete(callback);
+        if (listeners.size === 0) {
+          this.subscriptionCallbacks.delete(dest);
+          const sub = this.subscriptions.get(dest);
+          if (sub) {
+            try { sub.unsubscribe(); } catch {}
+            this.subscriptions.delete(dest);
+          }
+        }
       }
-    });
-    this.subscriptions.set(dest, sub);
+    };
   }
 
   subscribeRoomCollab(roomId: string, callback: MessageCallback) {
     this.currentRoomId = roomId;
-    this.genericSubscribe(`/topic/collab/${roomId}`, callback);
+    return this.genericSubscribe(`/topic/collab/${roomId}`, callback);
   }
 
   subscribeGhostDrafts(roomId: string, callback: MessageCallback) {
-    this.genericSubscribe(`/topic/room/${roomId}/ghost-draft`, callback);
+    return this.genericSubscribe(`/topic/room/${roomId}/ghost-draft`, callback);
+  }
+
+  subscribePresence(roomId: string, callback: MessageCallback) {
+    return this.genericSubscribe(`/topic/room/${roomId}/presence`, callback);
+  }
+
+  sendJoin(roomId: string, user: { id: string; name: string; role?: string }) {
+    if (!roomId || roomId === 'LOCAL-MODE') return;
+    const body = JSON.stringify({
+      salaId: roomId,
+      tipo: 'join',
+      emisorId: user.id,
+      emisorNombre: user.name,
+      payload: { usuario: user },
+      timestamp: Date.now(),
+    });
+
+    if (this.isConnected()) {
+      try {
+        this.client!.publish({ destination: `/app/collab/${roomId}`, body });
+      } catch (e) {
+        console.warn('[STOMP] Error al enviar join:', e);
+      }
+    } else {
+      this.offlineQueue.push({ destinations: [`/app/collab/${roomId}`], body });
+    }
+  }
+
+  sendSolicitarDiagrama(roomId: string) {
+    if (!roomId || roomId === 'LOCAL-MODE') return;
+    const body = JSON.stringify({
+      salaId: roomId,
+      tipo: 'solicitar_diagrama',
+      emisorId: 'usr-mobile-01',
+      emisorNombre: 'Desarrollador Móvil',
+      payload: {},
+      timestamp: Date.now(),
+    });
+
+    if (this.isConnected()) {
+      try {
+        this.client!.publish({ destination: `/app/collab/${roomId}`, body });
+      } catch (e) {
+        console.warn('[STOMP] Error al solicitar diagrama:', e);
+      }
+    } else {
+      this.offlineQueue.push({ destinations: [`/app/collab/${roomId}`], body });
+    }
+  }
+
+  sendLeave(roomId: string, user: { id: string; name: string }) {
+    if (!roomId || roomId === 'LOCAL-MODE') return;
+    const body = JSON.stringify({
+      salaId: roomId,
+      tipo: 'leave',
+      emisorId: user.id,
+      emisorNombre: user.name,
+      payload: { usuarioId: user.id },
+      timestamp: Date.now(),
+    });
+
+    if (this.isConnected()) {
+      try {
+        this.client!.publish({ destination: `/app/collab/${roomId}`, body });
+      } catch (e) {
+        console.warn('[STOMP] Error al enviar leave:', e);
+      }
+    }
   }
 
   subscribeChat(roomId: string, callback: MessageCallback) {
@@ -181,8 +281,13 @@ export class MobileStompClient {
       }
     };
 
-    this.genericSubscribe(`/topic/room/${roomId}/chat`, chatHandler);
-    this.genericSubscribe(`/topic/collab/${roomId}`, chatHandler);
+    const unsub1 = this.genericSubscribe(`/topic/room/${roomId}/chat`, chatHandler);
+    const unsub2 = this.genericSubscribe(`/topic/collab/${roomId}`, chatHandler);
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
   }
 
   /**
@@ -191,7 +296,7 @@ export class MobileStompClient {
   sendChatMessage(roomId: string, message: CollabMessage): boolean {
     const destinations = [
       `/app/collab/${roomId}`,
-      `/topic/room/${roomId}/chat`
+      `/topic/room/${roomId}/chat`,
     ];
 
     const backendPayload = JSON.stringify({
@@ -200,7 +305,7 @@ export class MobileStompClient {
       emisorId: message.sender,
       emisorNombre: message.sender,
       payload: message,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
 
     if (this.isConnected()) {
@@ -208,7 +313,7 @@ export class MobileStompClient {
         try {
           this.client!.publish({
             destination: dest,
-            body: dest.startsWith('/topic/') ? JSON.stringify(message) : backendPayload
+            body: dest.startsWith('/topic/') ? JSON.stringify(message) : backendPayload,
           });
         } catch (e) {
           console.warn(`[STOMP] Fallo al enviar a ${dest}:`, e);
@@ -218,7 +323,7 @@ export class MobileStompClient {
     } else {
       this.offlineQueue.push({
         destinations,
-        body: backendPayload
+        body: backendPayload,
       });
       return false;
     }
@@ -237,6 +342,7 @@ export class MobileStompClient {
     this.unsubscribe(`/topic/collab/${roomId}`);
     this.unsubscribe(`/topic/room/${roomId}/ghost-draft`);
     this.unsubscribe(`/topic/room/${roomId}/chat`);
+    this.unsubscribe(`/topic/room/${roomId}/presence`);
     if (this.currentRoomId === roomId) {
       this.currentRoomId = null;
     }

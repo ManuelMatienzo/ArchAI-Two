@@ -127,6 +127,51 @@ public class ServicioProyecto {
         return mapearMiembroADto(miembro);
     }
 
+    /**
+     * CU-02 · Un colaborador se une a un proyecto compartido usando su código de acceso.
+     * Idempotente: si ya es miembro, devuelve el proyecto sin duplicar la membresía.
+     */
+    @Transactional
+    public ProyectoDto unirseProyectoPorCodigo(UnirseProyectoSolicitudDto solicitud) {
+        String codigo = solicitud != null && solicitud.getCodigoAcceso() != null
+                ? solicitud.getCodigoAcceso().trim().toUpperCase()
+                : "";
+        if (codigo.isEmpty()) {
+            throw new ExcepcionNegocio("Debe indicar el código de acceso del proyecto.");
+        }
+
+        ProyectoEntity proyecto = proyectoRepository.findByCodigoAccesoIgnoreCase(codigo)
+                .orElseThrow(() -> new ExcepcionRecursoNoEncontrado(
+                        "No existe un proyecto con el código " + codigo + "."));
+
+        String identificador = solicitud.getUsuarioId() != null && !solicitud.getUsuarioId().trim().isEmpty()
+                ? solicitud.getUsuarioId().trim()
+                : (solicitud.getCorreoOUsuario() != null ? solicitud.getCorreoOUsuario().trim() : "");
+
+        if (identificador.isEmpty()) {
+            throw new ExcepcionNegocio("Debe indicar el usuario que se une al proyecto.");
+        }
+
+        Optional<UsuarioEntity> usuarioOpt = usuarioRepository.findById(identificador);
+        if (usuarioOpt.isEmpty()) usuarioOpt = usuarioRepository.findByCorreoIgnoreCase(identificador);
+        if (usuarioOpt.isEmpty()) usuarioOpt = usuarioRepository.findByNombreUsuarioIgnoreCase(identificador);
+        UsuarioEntity usuario = usuarioOpt.orElseThrow(() -> new ExcepcionRecursoNoEncontrado(
+                "No se encontró ningún usuario con: " + identificador));
+
+        if (!miembroProyectoRepository.existsByProyectoIdAndUsuarioId(proyecto.getId(), usuario.getId())) {
+            MiembroProyectoEntity miembro = MiembroProyectoEntity.builder()
+                    .id("miembro-" + UUID.randomUUID())
+                    .proyecto(proyecto)
+                    .usuario(usuario)
+                    .rolProyecto("EDITOR")
+                    .fechaAgregado(LocalDateTime.now())
+                    .build();
+            miembroProyectoRepository.save(miembro);
+        }
+
+        return mapearProyectoADto(proyecto);
+    }
+
     @Transactional
     public void removerMiembro(String proyectoId, String usuarioId) {
         miembroProyectoRepository.deleteByProyectoIdAndUsuarioId(proyectoId, usuarioId);

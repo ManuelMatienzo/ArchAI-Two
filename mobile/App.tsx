@@ -10,6 +10,7 @@ import { RoomsScreen } from './src/screens/RoomsScreen';
 import { CanvasViewerScreen } from './src/screens/CanvasViewerScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { colors } from './src/theme/colors';
 
 const Stack = createNativeStackNavigator();
@@ -19,8 +20,9 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        <NavigationContainer>
-        <Stack.Navigator
+        <ErrorBoundary>
+          <NavigationContainer>
+          <Stack.Navigator
           initialRouteName="Login"
           screenOptions={{
             headerStyle: {
@@ -54,7 +56,7 @@ export default function App() {
           <Stack.Screen
             name="Chat"
             component={ChatScreen}
-            options={{ title: 'Chat Técnico de Sala' }}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="Settings"
@@ -62,7 +64,8 @@ export default function App() {
             options={{ title: 'Configuración Móvil' }}
           />
         </Stack.Navigator>
-        </NavigationContainer>
+          </NavigationContainer>
+        </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

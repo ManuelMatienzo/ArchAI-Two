@@ -12,6 +12,7 @@ import java.util.Optional;
 @Repository
 public interface ProyectoRepository extends JpaRepository<ProyectoEntity, String> {
     Optional<ProyectoEntity> findByCodigoAcceso(String codigoAcceso);
+    Optional<ProyectoEntity> findByCodigoAccesoIgnoreCase(String codigoAcceso);
     List<ProyectoEntity> findByPropietarioId(String propietarioId);
 
     @Query("SELECT DISTINCT p FROM ProyectoEntity p LEFT JOIN p.miembros m WHERE p.propietario.id = :usuarioId OR m.usuario.id = :usuarioId ORDER BY p.fechaActualizacion DESC")

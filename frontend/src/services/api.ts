@@ -220,6 +220,14 @@ export function crearProyecto(datos: { nombre: string; descripcion?: string; ico
   });
 }
 
+/** CU-02 · Unirse a un proyecto compartido mediante su código de acceso. */
+export function unirseProyectoPorCodigo(codigoAcceso: string, usuarioId: string): Promise<Proyecto> {
+  return apiFetch<Proyecto>('/api/v1/proyectos/unirse', {
+    method: 'POST',
+    body: JSON.stringify({ codigoAcceso, usuarioId })
+  });
+}
+
 // ─────────────────────────── CU-03 · Sala Colaborativa ───────────────────────────
 
 export function crearSalaColaborativa(nombreSala: string, usuario: PerfilUsuario, pin?: string): Promise<InformacionSesion> {

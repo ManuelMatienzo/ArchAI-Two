@@ -69,7 +69,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           >
             <Wifi size={12} color={serverUrl.includes(getAutoDetectedHost()) ? colors.textOnPrimary : colors.primary} />
             <Text style={[styles.presetText, serverUrl.includes(getAutoDetectedHost()) && styles.presetTextActive]}>
-              Auto ({getAutoDetectedHost()})
+              Automático
             </Text>
           </TouchableOpacity>
 
@@ -78,7 +78,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             onPress={() => setServerUrl('http://10.0.2.2:8000/api/v1')}
           >
             <Server size={12} color={serverUrl.includes('10.0.2.2') ? colors.textOnPrimary : colors.primary} />
-            <Text style={[styles.presetText, serverUrl.includes('10.0.2.2') && styles.presetTextActive]}>Emulador</Text>
+            <Text style={[styles.presetText, serverUrl.includes('10.0.2.2') && styles.presetTextActive]}>Red Local</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -97,7 +97,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             setServerUrl(txt);
             setTestResult(null);
           }}
-          placeholder="http://192.168.1.100:8000/api/v1 o https://mi-backend.up.railway.app/api/v1"
+          placeholder="https://api.archai.io/api/v1"
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
         />

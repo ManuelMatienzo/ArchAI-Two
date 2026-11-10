@@ -1,95 +1,241 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
   FlatList,
-  Modal,
-  Platform,
+  RefreshControl,
+  ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  Users,
-  Plus,
-  Laptop,
-  ArrowRight,
-  ChevronRight,
-  Activity,
-  LogOut,
-  Radio,
-  User as UserIcon,
-} from 'lucide-react-native';
+import { Radio, Folder } from 'lucide-react-native';
 import { colors } from '../theme/colors';
+import { roomsApi, RoomItem, ProjectItem } from '../api/roomsApi';
+import {
+  RoomsUserBar,
+  RoomsSearchBar,
+  RoomCardItem,
+  JoinRoomCard,
+  JoinProjectCard,
+  CreateRoomModal,
+  ProjectCardItem,
+} from '../components/rooms';
 
-interface RoomItem {
-  id: string;
-  name: string;
-  projectCode: string;
-  activeUsers: number;
-  lastUpdated: string;
-}
+export type HubTab = 'projects' | 'rooms';
 
 export const RoomsScreen = ({ navigation }: any) => {
+  const [activeTab, setActiveTab] = useState<HubTab>('projects');
+  const [userId, setUserId] = useState('');
   const [userName, setUserName] = useState('Ing. Carlos Criado');
   const [userRole, setUserRole] = useState('Arquitecto de Software');
+  const [isSessionReady, setIsSessionReady] = useState(false);
+
+  // Filtro de búsqueda común
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Estado de Salas Colaborativas
+  const [rooms, setRooms] = useState<RoomItem[]>([]);
+  const [isLoadingRooms, setIsLoadingRooms] = useState(true);
   const [roomCode, setRoomCode] = useState('');
+  const [isJoiningRoom, setIsJoiningRoom] = useState(false);
   const [newRoomModalVisible, setNewRoomModalVisible] = useState(false);
   const [newRoomName, setNewRoomName] = useState('Sesión de Ingeniería UML');
+  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  const [joinRoomErrorMessage, setJoinRoomErrorMessage] = useState<string | null>(null);
+  const [createRoomErrorMessage, setCreateRoomErrorMessage] = useState<string | null>(null);
 
-  const [rooms, setRooms] = useState<RoomItem[]>([
-    {
-      id: 'ARC-GRUPO04',
-      name: 'Sesión Examen CASE - Grupo 04',
-      projectCode: 'PRJ-881920',
-      activeUsers: 3,
-      lastUpdated: 'Hace 2 min (Co-Diseño IA Activo)',
-    },
-    {
-      id: 'ARC-2041',
-      name: 'Microservicio de Inventario y Catálogo',
-      projectCode: 'PRJ-104928',
-      activeUsers: 1,
-      lastUpdated: 'Hace 15 min',
-    },
-  ]);
+  // Estado de Proyectos Segregados por Usuario (CU-02)
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [projectCodeInput, setProjectCodeInput] = useState('');
+  const [isJoiningProject, setIsJoiningProject] = useState(false);
+  const [projectErrorMessage, setProjectErrorMessage] = useState<string | null>(null);
+  const [projectSuccessMessage, setProjectSuccessMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    AsyncStorage.getItem('archai_session').then((raw) => {
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw);
-          if (parsed?.user?.name) setUserName(parsed.user.name);
-          if (parsed?.user?.role) setUserRole(parsed.user.role);
-        } catch {}
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Consulta de salas activas
+  const fetchActiveRooms = useCallback(async () => {
+    try {
+      const activeRooms = await roomsApi.listActiveRooms(userId || undefined);
+      setRooms(activeRooms);
+    } catch {
+      // Fallback silencioso
+    } finally {
+      setIsLoadingRooms(false);
+      setIsRefreshing(false);
+    }
+  }, [userId]);
+
+  // Consulta de proyectos pertenecientes al usuario autenticado (CU-02: solo creados o integrados)
+  const fetchUserProjects = useCallback(async () => {
+    try {
+      if (!userId) {
+        setIsLoadingProjects(false);
+        return;
       }
-    });
+      const userProjects = await roomsApi.listUserProjects(userId);
+      setProjects(userProjects);
+    } catch {
+      // Fallback silencioso
+    } finally {
+      setIsLoadingProjects(false);
+      setIsRefreshing(false);
+    }
+  }, [userId]);
+
+  // Carga de sesión de usuario autenticado
+  useEffect(() => {
+    let mounted = true;
+    AsyncStorage.getItem('archai_session')
+      .then((raw) => {
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed?.user?.id) setUserId(String(parsed.user.id));
+            if (parsed?.user?.name) setUserName(parsed.user.name);
+            if (parsed?.user?.role) setUserRole(parsed.user.role);
+          } catch {}
+        }
+      })
+      .finally(() => {
+        if (mounted) setIsSessionReady(true);
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const handleJoinByCode = () => {
-    if (!roomCode.trim()) return;
+  // Cargar datos cuando la identidad esté lista
+  useEffect(() => {
+    if (!isSessionReady) return;
+    fetchActiveRooms();
+    fetchUserProjects();
+  }, [isSessionReady, fetchActiveRooms, fetchUserProjects]);
+
+  const handleRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    fetchActiveRooms();
+    fetchUserProjects();
+  }, [fetchActiveRooms, fetchUserProjects]);
+
+  // Filtrado de proyectos por nombre, código o descripción
+  const filteredProjects = useMemo(() => {
+    if (!searchQuery.trim()) return projects;
+    const q = searchQuery.toLowerCase().trim();
+    return projects.filter(
+      (p) =>
+        p.nombre.toLowerCase().includes(q) ||
+        p.codigoAcceso.toLowerCase().includes(q) ||
+        (p.descripcion && p.descripcion.toLowerCase().includes(q))
+    );
+  }, [projects, searchQuery]);
+
+  // Filtrado reactivo de salas por nombre o código PIN
+  const filteredRooms = useMemo(() => {
+    if (!searchQuery.trim()) return rooms;
+    const q = searchQuery.toLowerCase().trim();
+    return rooms.filter(
+      (r) =>
+        r.id.toLowerCase().includes(q) ||
+        r.name.toLowerCase().includes(q) ||
+        (r.projectCode && r.projectCode.toLowerCase().includes(q))
+    );
+  }, [rooms, searchQuery]);
+
+  // Unirse a un proyecto compartido por su código de acceso (CU-02)
+  const handleJoinProjectByCode = async () => {
+    const cleanCode = projectCodeInput.trim().toUpperCase();
+    if (!cleanCode || isJoiningProject) return;
+
+    setIsJoiningProject(true);
+    setProjectErrorMessage(null);
+    setProjectSuccessMessage(null);
+
+    try {
+      const targetUserId = userId || 'usr-admin-01';
+      const joined = await roomsApi.joinProjectByCode(cleanCode, targetUserId);
+      setProjectCodeInput('');
+      setProjectSuccessMessage(`¡Te uniste con éxito a "${joined.nombre || cleanCode}"!`);
+      setTimeout(() => setProjectSuccessMessage(null), 3500);
+      await fetchUserProjects();
+    } catch (err: any) {
+      setProjectErrorMessage(
+        err.message || 'No se encontró ningún proyecto con ese código de acceso.'
+      );
+      setTimeout(() => setProjectErrorMessage(null), 4000);
+    } finally {
+      setIsJoiningProject(false);
+    }
+  };
+
+  // Selección de proyecto: abre el visor de canvas pasando projectId para cargar su diagrama
+  const handleSelectProject = (project: ProjectItem) => {
+    navigation.navigate('CanvasViewer', {
+      roomId: project.codigoAcceso,
+      roomName: project.nombre,
+      projectId: project.id,
+    });
+  };
+
+  // Unirse a sala por PIN
+  const handleJoinRoomByCode = async () => {
+    if (!roomCode.trim() || isJoiningRoom) return;
+    setIsJoiningRoom(true);
+    setJoinRoomErrorMessage(null);
+
     const cleanPin = roomCode.trim().toUpperCase();
     const finalPin = cleanPin.startsWith('ARC-') ? cleanPin : `ARC-${cleanPin}`;
-    navigation.navigate('CanvasViewer', { roomId: finalPin, roomName: `Sala ${finalPin}` });
+
+    try {
+      const currentUser = {
+        id: userId || undefined,
+        name: userName,
+        role: userRole,
+      };
+      const session = await roomsApi.joinRoom(finalPin, currentUser);
+      fetchActiveRooms();
+      navigation.navigate('CanvasViewer', {
+        roomId: session.roomId || finalPin,
+        roomName: session.roomName || `Sala ${finalPin}`,
+      });
+    } catch (err: any) {
+      setJoinRoomErrorMessage(err.message || 'No se pudo conectar con la sala. Verifica el PIN.');
+      setTimeout(() => setJoinRoomErrorMessage(null), 4000);
+    } finally {
+      setIsJoiningRoom(false);
+    }
   };
 
   const handleSelectRoom = (room: RoomItem) => {
     navigation.navigate('CanvasViewer', { roomId: room.id, roomName: room.name });
   };
 
-  const handleCreateHostRoom = () => {
+  // Crear sala anfitrión
+  const handleCreateHostRoom = async () => {
+    if (isCreatingRoom) return;
+    setIsCreatingRoom(true);
+    setCreateRoomErrorMessage(null);
     const generatedPin = 'ARC-' + Math.floor(100000 + Math.random() * 900000);
-    const newRoom: RoomItem = {
-      id: generatedPin,
-      name: newRoomName.trim() || 'Nueva Sala de Arquitectura',
-      projectCode: 'PRJ-' + Math.floor(100000 + Math.random() * 900000),
-      activeUsers: 1,
-      lastUpdated: 'Creada ahora mismo',
-    };
-    setRooms([newRoom, ...rooms]);
-    setNewRoomModalVisible(false);
-    navigation.navigate('CanvasViewer', { roomId: generatedPin, roomName: newRoom.name });
+    try {
+      const currentUser = {
+        id: userId || undefined,
+        name: userName,
+        role: userRole,
+      };
+      const created = await roomsApi.createRoom(newRoomName, currentUser, generatedPin);
+      setNewRoomModalVisible(false);
+      fetchActiveRooms();
+      navigation.navigate('CanvasViewer', {
+        roomId: created.roomId || generatedPin,
+        roomName: created.roomName || newRoomName,
+      });
+    } catch {
+      setCreateRoomErrorMessage('No se pudo crear la sala. Intenta de nuevo más tarde.');
+    } finally {
+      setIsCreatingRoom(false);
+    }
   };
 
   const handleEnterLocalMode = () => {
@@ -101,146 +247,209 @@ export const RoomsScreen = ({ navigation }: any) => {
 
   const handleLogout = async () => {
     await AsyncStorage.removeItem('archai_session');
+    await AsyncStorage.removeItem('archai_jwt_token');
     navigation.replace('Login');
   };
 
   return (
     <View style={styles.container}>
-      {/* Barra de Perfil Logueado */}
-      <View style={styles.userBar}>
-        <View style={styles.userInfo}>
-          <View style={styles.userAvatar}>
-            <UserIcon size={16} color={colors.primary} />
-          </View>
-          <View>
-            <Text style={styles.userNameText}>{userName}</Text>
-            <Text style={styles.userRoleText}>{userRole}</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <LogOut size={16} color={colors.textSecondary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Acciones Principales (Unirse | Crear | Modo Local) */}
-      <View style={styles.actionsContainer}>
-        {/* Unirse por Código */}
-        <View style={styles.joinBox}>
-          <Text style={styles.sectionLabel}>UNIRSE A SALA COLABORATIVA</Text>
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.codeInput}
-              value={roomCode}
-              onChangeText={setRoomCode}
-              placeholder="Código PIN (ej. ARC-GRUPO04)"
-              placeholderTextColor={colors.textMuted}
-              autoCapitalize="characters"
-            />
-            <TouchableOpacity style={styles.joinActionBtn} onPress={handleJoinByCode}>
-              <ArrowRight size={16} color={colors.textOnPrimary} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Botones de Crear Sala / Modo Local */}
-        <View style={styles.quickActionRow}>
-          <TouchableOpacity
-            style={styles.hostActionBtn}
-            onPress={() => setNewRoomModalVisible(true)}
-          >
-            <Plus size={16} color={colors.primary} />
-            <Text style={styles.hostActionBtnText}>Crear Sala (Anfitrión)</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.soloActionBtn}
-            onPress={handleEnterLocalMode}
-          >
-            <Laptop size={16} color={colors.textSecondary} />
-            <Text style={styles.soloActionBtnText}>Modo Personal</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Lista de Salas Activas */}
-      <View style={styles.listHeaderRow}>
-        <Radio size={14} color={colors.primary} />
-        <Text style={styles.listSectionTitle}>Salas Activas Disponibles</Text>
-      </View>
-
-      <FlatList
-        data={rooms}
-        keyExtractor={(item) => item.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContainer}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.roomCard} onPress={() => handleSelectRoom(item)}>
-            <View style={styles.roomCardLeft}>
-              <View style={styles.roomHeader}>
-                <View style={styles.roomIdBadge}>
-                  <Text style={styles.roomIdText}>{item.id}</Text>
-                </View>
-                <View style={styles.liveIndicator}>
-                  <Activity size={12} color={colors.success} />
-                  <Text style={styles.activeUsers}>{item.activeUsers} en sala</Text>
-                </View>
-              </View>
-
-              <Text style={styles.roomName}>{item.name}</Text>
-              <Text style={styles.projectCode}>Proyecto: {item.projectCode}</Text>
-              <Text style={styles.lastUpdated}>{item.lastUpdated}</Text>
-            </View>
-
-            <ChevronRight size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
+      {/* 1. Barra de Perfil Logueado con Ajustes y Salida */}
+      <RoomsUserBar
+        userName={userName}
+        userRole={userRole}
+        onOpenSettings={() => navigation.navigate('Settings')}
+        onLogout={handleLogout}
       />
 
-      {/* Modal Crear Sala Nueva */}
-      <Modal
-        visible={newRoomModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNewRoomModalVisible(false)}
-      >
+      {/* 2. Selector de Pestañas: Mis Proyectos vs Salas Colaborativas */}
+      <View style={styles.tabSelectorRow}>
         <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setNewRoomModalVisible(false)}
+          style={[styles.tabButton, activeTab === 'projects' && styles.tabButtonActive]}
+          onPress={() => {
+            setActiveTab('projects');
+            setSearchQuery('');
+          }}
+          activeOpacity={0.75}
+          accessibilityRole="tab"
+          accessibilityLabel="Pestaña Mis Proyectos"
         >
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Crear Sala Colaborativa</Text>
-            <Text style={styles.modalSubtitle}>
-              Como anfitrión podrás invitar colaboradores con el PIN generado.
-            </Text>
-
-            <TextInput
-              style={styles.modalInput}
-              value={newRoomName}
-              onChangeText={setNewRoomName}
-              placeholder="Nombre descriptivo de la sala"
-              placeholderTextColor={colors.textMuted}
-            />
-
-            <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setNewRoomModalVisible(false)}
-              >
-                <Text style={styles.modalCancelBtnText}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalConfirmBtn}
-                onPress={handleCreateHostRoom}
-              >
-                <Text style={styles.modalConfirmBtnText}>Crear e Ingresar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <Folder
+            size={14}
+            color={activeTab === 'projects' ? colors.primary : colors.textMuted}
+          />
+          <Text
+            style={[styles.tabButtonText, activeTab === 'projects' && styles.tabButtonTextActive]}
+          >
+            Mis Proyectos {projects.length > 0 ? `(${projects.length})` : ''}
+          </Text>
         </TouchableOpacity>
-      </Modal>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'rooms' && styles.tabButtonActive]}
+          onPress={() => {
+            setActiveTab('rooms');
+            setSearchQuery('');
+          }}
+          activeOpacity={0.75}
+          accessibilityRole="tab"
+          accessibilityLabel="Pestaña Salas en Vivo"
+        >
+          <Radio
+            size={14}
+            color={activeTab === 'rooms' ? colors.primary : colors.textMuted}
+          />
+          <Text
+            style={[styles.tabButtonText, activeTab === 'rooms' && styles.tabButtonTextActive]}
+          >
+            Salas en Vivo {rooms.length > 0 ? `(${rooms.length})` : ''}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 3. Contenido condicional según la pestaña activa */}
+      {activeTab === 'projects' ? (
+        <>
+          {/* Tarjeta de Unirse a Proyecto por Código de Acceso */}
+          <JoinProjectCard
+            projectCode={projectCodeInput}
+            onChangeProjectCode={setProjectCodeInput}
+            onJoin={handleJoinProjectByCode}
+            isJoining={isJoiningProject}
+            errorMessage={projectErrorMessage}
+            successMessage={projectSuccessMessage}
+          />
+
+          {/* Buscador de Proyectos */}
+          <RoomsSearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onClear={() => setSearchQuery('')}
+            placeholder="Filtrar por nombre o código de acceso..."
+          />
+
+          {/* Encabezado de Lista de Proyectos */}
+          <View style={styles.listHeaderRow}>
+            <Folder size={14} color={colors.primary} />
+            <Text style={styles.listSectionTitle}>Proyectos de Tu Cuenta</Text>
+          </View>
+
+          {/* FlatList de Proyectos */}
+          <FlatList
+            data={filteredProjects}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContainer}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            ListEmptyComponent={
+              !isLoadingProjects ? (
+                <View style={styles.emptyListContainer}>
+                  <Text style={styles.emptyListText}>
+                    {searchQuery
+                      ? `No se encontraron proyectos que coincidan con "${searchQuery}"`
+                      : 'No tienes proyectos asignados. Únete a uno ingresando su código de acceso arriba.'}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              )
+            }
+            renderItem={({ item }) => (
+              <ProjectCardItem
+                project={item}
+                currentUserId={userId}
+                onSelect={handleSelectProject}
+              />
+            )}
+          />
+        </>
+      ) : (
+        <>
+          {/* Tarjeta de Acceso a Salas Colaborativas */}
+          <JoinRoomCard
+            roomCode={roomCode}
+            onChangeRoomCode={setRoomCode}
+            onJoin={handleJoinRoomByCode}
+            isJoining={isJoiningRoom}
+            errorMessage={joinRoomErrorMessage}
+            onCreateRoom={() => {
+              setCreateRoomErrorMessage(null);
+              setNewRoomModalVisible(true);
+            }}
+            onEnterLocalMode={handleEnterLocalMode}
+          />
+
+          {/* Buscador de Salas */}
+          <RoomsSearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onClear={() => setSearchQuery('')}
+            placeholder="Filtrar por nombre o PIN..."
+          />
+
+          {/* Encabezado de Lista de Salas */}
+          <View style={styles.listHeaderRow}>
+            <Radio size={14} color={colors.primary} />
+            <Text style={styles.listSectionTitle}>Mis Salas Colaborativas</Text>
+          </View>
+
+          {/* FlatList de Salas */}
+          <FlatList
+            data={filteredRooms}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContainer}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            ListEmptyComponent={
+              !isLoadingRooms ? (
+                <View style={styles.emptyListContainer}>
+                  <Text style={styles.emptyListText}>
+                    {searchQuery
+                      ? `No se encontraron salas que coincidan con "${searchQuery}"`
+                      : 'No tienes salas activas. Crea una como anfitrión o únete con un PIN.'}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              )
+            }
+            renderItem={({ item }) => (
+              <RoomCardItem room={item} onSelect={handleSelectRoom} />
+            )}
+          />
+
+          {/* Modal Crear Sala Nueva */}
+          <CreateRoomModal
+            visible={newRoomModalVisible}
+            onClose={() => {
+              setNewRoomModalVisible(false);
+              setCreateRoomErrorMessage(null);
+            }}
+            roomName={newRoomName}
+            onChangeRoomName={setNewRoomName}
+            onConfirmCreate={handleCreateHostRoom}
+            isCreating={isCreatingRoom}
+            errorMessage={createRoomErrorMessage}
+          />
+        </>
+      )}
     </View>
   );
 };
@@ -252,125 +461,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
   },
-  userBar: {
+  tabSelectorRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 12,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceCard,
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(23, 26, 74, 0.40)',
     borderWidth: 1,
     borderColor: colors.borderGlass,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 16,
   },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  userAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: 'rgba(232, 195, 158, 0.12)',
-    borderWidth: 1,
+  tabButtonActive: {
+    backgroundColor: 'rgba(232, 195, 158, 0.16)',
     borderColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  userNameText: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '700',
+  tabButtonText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
   },
-  userRoleText: {
-    color: colors.textSecondary,
-    fontSize: 11,
-  },
-  logoutBtn: {
-    padding: 6,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-  },
-  actionsContainer: {
-    gap: 10,
-    marginBottom: 18,
-  },
-  joinBox: {
-    backgroundColor: colors.surfaceCard,
-    borderWidth: 1,
-    borderColor: colors.borderGlass,
-    borderRadius: 12,
-    padding: 12,
-  },
-  sectionLabel: {
-    color: colors.textSecondary,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    marginBottom: 8,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  codeInput: {
-    flex: 1,
-    backgroundColor: colors.surfaceInput,
-    borderWidth: 1,
-    borderColor: colors.borderInput,
-    borderRadius: 8,
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    fontSize: 13,
-    color: colors.textPrimary,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    fontWeight: '700',
-  },
-  joinActionBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  quickActionRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  hostActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(232, 195, 158, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(232, 195, 158, 0.30)',
-    borderRadius: 10,
-    paddingVertical: 10,
-  },
-  hostActionBtnText: {
+  tabButtonTextActive: {
     color: colors.primary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  soloActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderWidth: 1,
-    borderColor: colors.borderInput,
-    borderRadius: 10,
-    paddingVertical: 10,
-  },
-  soloActionBtnText: {
-    color: colors.textSecondary,
-    fontSize: 12,
     fontWeight: '700',
   },
   listHeaderRow: {
@@ -390,127 +508,21 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 20,
   },
-  roomCard: {
-    backgroundColor: colors.surfaceCard,
-    borderWidth: 1,
-    borderColor: colors.borderGlass,
-    borderRadius: 12,
-    padding: 14,
-    flexDirection: 'row',
+  emptyListContainer: {
+    paddingVertical: 28,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  roomCardLeft: {
-    flex: 1,
-  },
-  roomHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-    paddingRight: 10,
-  },
-  roomIdBadge: {
-    backgroundColor: colors.secondary,
-    borderWidth: 1,
-    borderColor: colors.secondaryBorder,
-    borderRadius: 6,
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-  },
-  roomIdText: {
-    color: colors.primary,
-    fontSize: 11,
-    fontWeight: '800',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-  },
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  activeUsers: {
-    color: colors.success,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  roomName: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  projectCode: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    marginBottom: 2,
-  },
-  lastUpdated: {
-    color: colors.textMuted,
-    fontSize: 10,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 32, 0.85)',
     justifyContent: 'center',
+  },
+  emptyListText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  loadingContainer: {
+    paddingVertical: 32,
     alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    width: '100%',
-    maxWidth: 320,
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.borderGlass,
-    padding: 18,
-  },
-  modalTitle: {
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  modalSubtitle: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    marginBottom: 14,
-    lineHeight: 15,
-  },
-  modalInput: {
-    backgroundColor: colors.surfaceInput,
-    borderWidth: 1,
-    borderColor: colors.borderInput,
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    fontSize: 13,
-    color: colors.textPrimary,
-    marginBottom: 16,
-  },
-  modalBtnRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-  },
-  modalCancelBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  modalCancelBtnText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modalConfirmBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  modalConfirmBtnText: {
-    color: colors.textOnPrimary,
-    fontSize: 12,
-    fontWeight: '800',
+    justifyContent: 'center',
   },
 });

@@ -30,6 +30,12 @@ public class ControladorProyecto {
         return ResponseEntity.ok(servicioProyecto.crearProyecto(solicitud));
     }
 
+    /** CU-02 · Un colaborador se une al proyecto compartido mediante su código de acceso. */
+    @PostMapping({"/unirse", "/join"})
+    public ResponseEntity<ProyectoDto> unirseProyecto(@RequestBody UnirseProyectoSolicitudDto solicitud) {
+        return ResponseEntity.ok(servicioProyecto.unirseProyectoPorCodigo(solicitud));
+    }
+
     @PostMapping("/{id}/miembros")
     public ResponseEntity<MiembroProyectoDto> invitarMiembro(@PathVariable String id, @RequestBody InvitarMiembroDto solicitud) {
         return ResponseEntity.ok(servicioProyecto.invitarMiembro(id, solicitud));

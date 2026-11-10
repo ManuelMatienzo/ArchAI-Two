@@ -1,8 +1,18 @@
-import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'react-native';
-import { Lock } from 'lucide-react-native';
+import React, { useState, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  ScrollView,
+} from 'react-native';
+import { ShieldCheck, Layers, FileCode, Database, X } from 'lucide-react-native';
 import { UmlClass } from '../types/uml';
 import { colors } from '../theme/colors';
+import { generateJavaJpa, generateSqlDdl } from '../services/codegen/codeGenerators';
+import { CodeViewer } from './modal/CodeViewer';
+import { UmlStructureViewer } from './modal/UmlStructureViewer';
 
 interface BottomSheetModalProps {
   visible: boolean;
@@ -10,7 +20,29 @@ interface BottomSheetModalProps {
   umlClass: UmlClass | null;
 }
 
-export const BottomSheetModal: React.FC<BottomSheetModalProps> = ({ visible, onClose, umlClass }) => {
+type TabKey = 'uml' | 'java' | 'sql';
+
+/**
+ * Hoja Deslizante Táctil de Inspección y Lectura de Código (Modo Viaje - Solo Lectura).
+ * Proporciona acceso inmediato a la estructura UML de la clase, su entidad generada
+ * en Java 17 JPA y su esquema relacional DDL PostgreSQL con copiado al portapapeles.
+ */
+export const BottomSheetModal: React.FC<BottomSheetModalProps> = ({
+  visible,
+  onClose,
+  umlClass,
+}) => {
+  const [activeTab, setActiveTab] = useState<TabKey>('uml');
+
+  // Generación sintáctica determinista en cliente (memorizada por clase)
+  const javaCode = useMemo(() => {
+    return umlClass ? generateJavaJpa(umlClass) : '';
+  }, [umlClass]);
+
+  const sqlCode = useMemo(() => {
+    return umlClass ? generateSqlDdl(umlClass) : '';
+  }, [umlClass]);
+
   if (!umlClass) return null;
 
   return (
@@ -21,69 +53,125 @@ export const BottomSheetModal: React.FC<BottomSheetModalProps> = ({ visible, onC
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
-        
+        {/* Fondo táctil para cerrar el modal */}
+        <TouchableOpacity
+          style={styles.backdrop}
+          onPress={onClose}
+          activeOpacity={1}
+          accessibilityLabel="Cerrar modal"
+        />
+
         <View style={styles.sheetContainer}>
-          {/* Handle bar */}
+          {/* Manija táctil superior (Handle Bar) */}
           <View style={styles.handleBar} />
 
-          {/* Header */}
+          {/* Encabezado de la Clase */}
           <View style={styles.header}>
-            <View>
-              {umlClass.stereotype && (
-                <Text style={styles.stereotype}>«{umlClass.stereotype}»</Text>
-              )}
-              <Text style={styles.className}>{umlClass.name}</Text>
+            <View style={styles.headerInfo}>
+              <View style={styles.stereotypeBadge}>
+                <Text style={styles.stereotype}>
+                  «{umlClass.stereotype || 'Entity'}»
+                </Text>
+              </View>
+              <Text style={styles.className} numberOfLines={1}>
+                {umlClass.name}
+              </Text>
               {umlClass.tableName && (
-                <Text style={styles.tableName}>Tabla SQL: {umlClass.tableName}</Text>
+                <Text style={styles.tableName}>
+                  Tabla: {umlClass.tableName}
+                </Text>
               )}
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Text style={styles.closeBtnText}>✕</Text>
+
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.closeBtn}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Cerrar inspector"
+            >
+              <X size={18} color="#94a3b8" />
             </TouchableOpacity>
           </View>
 
-          {/* Body content */}
-          <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-            {/* Attributes Section */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Atributos ({umlClass.attributes.length})</Text>
-              {umlClass.attributes.map((attr) => (
-                <View key={attr.id} style={styles.itemRow}>
-                  <Text style={styles.visibility}>{attr.visibility}</Text>
-                  <Text style={styles.attrName}>
-                    {attr.name}
-                    {attr.isPrimaryKey && <Text style={styles.pkBadge}> [PK]</Text>}
-                    {attr.isForeignKey && <Text style={styles.fkBadge}> [FK]</Text>}
-                  </Text>
-                  <Text style={styles.attrType}>: {attr.type}</Text>
-                </View>
-              ))}
-              {umlClass.attributes.length === 0 && (
-                <Text style={styles.emptyText}>Sin atributos definidos</Text>
-              )}
-            </View>
+          {/* Selector Ergonómico de 3 Pestañas */}
+          <View style={styles.tabBar}>
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'uml' && styles.tabButtonActive]}
+              onPress={() => setActiveTab('uml')}
+              activeOpacity={0.75}
+            >
+              <Layers
+                size={13}
+                color={activeTab === 'uml' ? colors.primary : colors.textMuted}
+                style={styles.tabIcon}
+              />
+              <Text style={[styles.tabText, activeTab === 'uml' && styles.tabTextActive]}>
+                UML
+              </Text>
+            </TouchableOpacity>
 
-            {/* Methods Section */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Métodos ({umlClass.methods.length})</Text>
-              {umlClass.methods.map((method) => (
-                <View key={method.id} style={styles.itemRow}>
-                  <Text style={styles.visibility}>{method.visibility}</Text>
-                  <Text style={styles.methodName}>{method.name}()</Text>
-                  <Text style={styles.methodReturnType}>: {method.returnType}</Text>
-                </View>
-              ))}
-              {umlClass.methods.length === 0 && (
-                <Text style={styles.emptyText}>Sin métodos definidos</Text>
-              )}
-            </View>
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'java' && styles.tabButtonActive]}
+              onPress={() => setActiveTab('java')}
+              activeOpacity={0.75}
+            >
+              <FileCode
+                size={13}
+                color={activeTab === 'java' ? colors.primary : colors.textMuted}
+                style={styles.tabIcon}
+              />
+              <Text style={[styles.tabText, activeTab === 'java' && styles.tabTextActive]}>
+                Java JPA
+              </Text>
+            </TouchableOpacity>
 
-            {/* Read-Only Badge */}
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'sql' && styles.tabButtonActive]}
+              onPress={() => setActiveTab('sql')}
+              activeOpacity={0.75}
+            >
+              <Database
+                size={13}
+                color={activeTab === 'sql' ? colors.primary : colors.textMuted}
+                style={styles.tabIcon}
+              />
+              <Text style={[styles.tabText, activeTab === 'sql' && styles.tabTextActive]}>
+                SQL DDL
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Contenido según la pestaña activa */}
+          <ScrollView
+            style={styles.body}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {activeTab === 'uml' && (
+              <UmlStructureViewer umlClass={umlClass} />
+            )}
+
+            {activeTab === 'java' && (
+              <CodeViewer
+                code={javaCode}
+                languageLabel="Java 17 / Jakarta Persistence (JPA)"
+                icon={<FileCode size={13} color={colors.primary} />}
+              />
+            )}
+
+            {activeTab === 'sql' && (
+              <CodeViewer
+                code={sqlCode}
+                languageLabel="PostgreSQL 14+ DDL"
+                icon={<Database size={13} color={colors.primary} />}
+              />
+            )}
+
+            {/* Aviso Permanente de Modo Viaje (100% Solo Lectura) */}
             <View style={styles.readOnlyNotice}>
-              <Lock size={13} color={colors.primary} style={{ marginRight: 6 }} />
+              <ShieldCheck size={14} color="#38bdf8" style={styles.shieldIcon} />
               <Text style={styles.readOnlyText}>
-                Modo Viaje (Solo Lectura): Modificaciones deshabilitadas para prevenir mutaciones accidentales táctiles.
+                MODO VIAJE ACTIVO · Consulta y exportación de código habilitadas. La edición de clases y relaciones está restringida a la versión de escritorio.
               </Text>
             </View>
           </ScrollView>
@@ -97,7 +185,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: 'rgba(0, 0, 16, 0.72)',
   },
   backdrop: {
     flex: 1,
@@ -107,126 +195,127 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
-    borderColor: colors.borderGlass,
-    maxHeight: '75%',
-    paddingHorizontal: 20,
-    paddingBottom: 32,
+    borderColor: 'rgba(232, 195, 158, 0.28)',
+    maxHeight: '84%',
+    paddingHorizontal: 18,
+    paddingBottom: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 20,
   },
   handleBar: {
-    width: 44,
-    height: 5,
+    width: 42,
+    height: 4.5,
     borderRadius: 3,
-    backgroundColor: colors.textMuted,
+    backgroundColor: 'rgba(232, 195, 158, 0.35)',
     alignSelf: 'center',
     marginTop: 10,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     borderBottomWidth: 1,
-    borderBottomColor: colors.borderGlass,
-    paddingBottom: 12,
+    borderBottomColor: 'rgba(232, 195, 158, 0.16)',
+    paddingBottom: 10,
+  },
+  headerInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  stereotypeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(232, 195, 158, 0.12)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginBottom: 3,
   },
   stereotype: {
-    fontSize: 12,
+    fontSize: 10,
     color: colors.primary,
     fontFamily: 'monospace',
+    fontWeight: '700',
   },
   className: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textPrimary,
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 0.3,
   },
   tableName: {
-    fontSize: 12,
-    color: colors.textSecondary,
+    fontSize: 11,
+    color: colors.textMuted,
+    fontFamily: 'monospace',
     marginTop: 2,
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  closeBtnText: {
-    fontSize: 18,
-    color: colors.textSecondary,
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderRadius: 10,
+    padding: 3,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(232, 195, 158, 0.16)',
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    borderRadius: 7,
+  },
+  tabButtonActive: {
+    backgroundColor: 'rgba(232, 195, 158, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 195, 158, 0.40)',
+  },
+  tabIcon: {
+    marginRight: 5,
+  },
+  tabText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  tabTextActive: {
+    color: colors.primary,
+    fontWeight: '700',
   },
   body: {
     marginTop: 14,
-  },
-  section: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 8,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 5,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  visibility: {
-    width: 18,
-    fontSize: 14,
-    color: colors.warning,
-    fontWeight: '700',
-    fontFamily: 'monospace',
-  },
-  attrName: {
-    fontSize: 14,
-    color: colors.textPrimary,
-    fontWeight: '500',
-  },
-  attrType: {
-    fontSize: 14,
-    color: colors.umlType,
-    fontFamily: 'monospace',
-  },
-  methodName: {
-    fontSize: 14,
-    color: colors.textPrimary,
-  },
-  methodReturnType: {
-    fontSize: 14,
-    color: colors.umlType,
-    fontFamily: 'monospace',
-  },
-  pkBadge: {
-    color: colors.umlAttributePk,
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  fkBadge: {
-    color: colors.umlAttributeFk,
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  emptyText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    fontStyle: 'italic',
   },
   readOnlyNotice: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(56, 189, 248, 0.08)',
-    borderRadius: 8,
-    padding: 10,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.2)',
-    marginTop: 8,
+    borderColor: 'rgba(56, 189, 248, 0.22)',
+    marginTop: 4,
+    marginBottom: 20,
+  },
+  shieldIcon: {
+    marginRight: 8,
   },
   readOnlyText: {
     flex: 1,
-    fontSize: 12,
-    color: colors.primary,
-    lineHeight: 16,
+    fontSize: 11,
+    color: '#38bdf8',
+    lineHeight: 15,
+    fontWeight: '500',
   },
 });
