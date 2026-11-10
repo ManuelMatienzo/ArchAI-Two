@@ -61,3 +61,12 @@ Thumbs.db
 desktop.ini
 *.swp
 *~
+.env.local
+mobile/google-services.json
+mobile/*service-account*.json
+mobile/*firebase-adminsdk*.json
+mobile/credentials.json
+*.jks
+*.keystore
+.archai/
+frontend/vite.team-test.local.mjs

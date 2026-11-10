@@ -41,6 +41,7 @@ import {
   Bot,
   Heart
 } from 'lucide-react';
+import { reportArtifact } from '../../services/projectActivity';
 import { ModeloDiagrama } from '../../types/uml';
 import { GeneracionHistorial } from '../../types/generation';
 import { 
@@ -277,6 +278,7 @@ export const CodeGenerationDock: React.FC<CodeGenerationDockProps> = ({
       link.href = url;
       link.download = `${(diagram.title || 'archai-ia-project').toLowerCase().replace(/[^a-z0-9]/g, '-')}-ia-suite-completa.zip`;
       link.click();
+      reportArtifact('suite_zip');
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error empaquetando ZIP Suite Completa:', err);
@@ -300,6 +302,7 @@ export const CodeGenerationDock: React.FC<CodeGenerationDockProps> = ({
       link.href = url;
       link.download = `${(diagram.title || 'archai-flutter-app').toLowerCase().replace(/[^a-z0-9]/g, '-')}-flutter.zip`;
       link.click();
+      reportArtifact('flutter_zip');
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error empaquetando ZIP Flutter:', err);
@@ -477,6 +480,7 @@ export const CodeGenerationDock: React.FC<CodeGenerationDockProps> = ({
     link.href = url;
     link.download = activeFilename;
     link.click();
+      reportArtifact('code');
     URL.revokeObjectURL(url);
   };
 
@@ -490,6 +494,7 @@ export const CodeGenerationDock: React.FC<CodeGenerationDockProps> = ({
       link.href = url;
       link.download = `${(diagram.title || 'archai-backend').toLowerCase().replace(/[^a-z0-9]/g, '-')}.zip`;
       link.click();
+      reportArtifact('backend_zip');
       URL.revokeObjectURL(url);
     } catch (err) {
       console.warn('Backend ZIP endpoint no disponible, descargando archivo individual:', err);

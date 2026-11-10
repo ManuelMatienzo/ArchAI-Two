@@ -14,12 +14,12 @@ export const GhostDraftBanner: React.FC<GhostDraftBannerProps> = ({ proposal, on
   return (
     <TouchableOpacity style={styles.banner} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.badge}>
-        <Text style={styles.badgeText}>IA GHOST DRAFT</Text>
+        <Text style={styles.badgeText}>PROPUESTA IA</Text>
       </View>
       <View style={styles.content}>
         <Text style={styles.title} numberOfLines={1}>{proposal.title}</Text>
         <Text style={styles.desc} numberOfLines={1}>
-          Propone {proposal.classes.length} clases · Toca para inspeccionar
+          {proposal.classes.length} clases · {proposal.relationships.length} relaciones{proposal.deletions?.length?` · ${proposal.deletions.length} eliminaciones`:''} · Inspeccionar
         </Text>
       </View>
       <Text style={styles.chevron}>→</Text>

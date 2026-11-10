@@ -3241,8 +3241,11 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       onDrop={handleCanvasDrop}
       style={{
         flex: 1,
+        minHeight: 0,
+        minWidth: 0,
         position: 'relative',
-        overflow: 'hidden',
+        // Pan and zoom use transforms. Clipping prevents keyboard focus from scrolling this viewport.
+        overflow: 'clip',
         background: 'var(--bg-canvas)',
         cursor: isPanning ? 'grabbing' : ((isRelationMode || connectingSourceId) ? 'crosshair' : (isSpacePressed ? 'grab' : 'default'))
       }}
@@ -3305,6 +3308,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
         {/* Render Connection Lines (UML 2.5 rigorous rendering) */}
         <RelationLayer
+          deletionIds={new Set((proposalDraft?.deletions||[]).flatMap(d=>d.kind==='relation'?[d.targetId]:d.affectedRelationIds))}
           draftIds={ghostRelationIds}
           paths={relationPaths}
           selectedRelationId={selectedRelationId}
@@ -4107,6 +4111,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         {displayedClasses.map(cls => (
           <UmlNodeCard
             key={cls.id}
+            proposedDeletion={proposalDraft?.deletions?.some(d=>d.kind==='class'?d.targetId===cls.id:d.classId===cls.id)}
             cls={cls}
             draft={ghostIds.has(cls.id)}
             diagram={ghostIds.has(cls.id)?{...diagram,classes:displayedClasses,relations:[...diagram.relations,...(proposalDraft?.relations || [])]}:diagram}
@@ -4322,7 +4327,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             borderRadius: '16px',
             padding: '6px 10px',
             boxShadow: 'var(--glass-topbar-shadow)',
-            maxWidth: 'calc(100vw - 32px)',
+            maxWidth: 'calc(100% - 24px)',
             overflowX: 'auto'
           }}
         >

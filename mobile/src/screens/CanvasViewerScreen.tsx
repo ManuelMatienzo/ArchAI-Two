@@ -35,6 +35,7 @@ import * as Clipboard from 'expo-clipboard';
 import { colors } from '../theme/colors';
 import { UmlClass, UmlRelationship, GhostDraftProposal } from '../types/uml';
 import { BottomSheetModal } from '../components/BottomSheetModal';
+import { ProposalDetailsModal } from '../components/ProposalDetailsModal';
 import { GhostDraftBanner } from '../components/GhostDraftBanner';
 import { CanvasHeader } from '../components/canvas/CanvasHeader';
 import { SpotlightSearchBar } from '../components/canvas/SpotlightSearchBar';
@@ -47,6 +48,7 @@ import { computeDiagramRelationships, getEstimatedClassHeight } from '../utils/d
 import { normalizeDiagramCoordinates, normalizeGhostDraft } from '../utils/diagramSanitizer';
 import { diagramCacheService } from '../services/diagramCacheService';
 import { roomsApi, RoomParticipant, parseBackendDiagram } from '../api/roomsApi';
+import { conversationApi, readCurrentUser, toGhostDraft } from '../api/conversationApi';
 import { mobileStomp } from '../api/stompClient';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -95,7 +97,10 @@ const ZoomBadge = ({ progress }: { progress: SharedValue<number> }) => {
 
 export const CanvasViewerScreen = ({ route, navigation }: any) => {
   const { roomId = 'ARC-1029', roomName = 'Sala de Co-Diseño', projectId } = route.params || {};
-  const cacheKey = projectId ? `proj_${projectId}` : roomId;
+  const [accountId,setAccountId]=useState('');
+  const [diagramId,setDiagramId]=useState<string|undefined>(route.params?.diagramId);
+  const cacheKey = `${accountId}/${roomId}/${diagramId||projectId||''}`;
+  useEffect(()=>{void readCurrentUser().then(u=>setAccountId(u?.id||''));},[]);
 
   // Estado reactivo del lienzo UML: cargado dinámicamente desde el backend
   const [classes, setClasses] = useState<UmlClass[]>([]);
@@ -116,6 +121,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
     } catch {}
   }, [roomId]);
 
+  const [proposalDetailsVisible,setProposalDetailsVisible]=useState(false);
   const [activeGhostDraft, setActiveGhostDraft] = useState<GhostDraftProposal | null>(null);
 
   // Registro en tiempo real de nodos siendo arrastrados remotamente por colaboradores
@@ -394,6 +400,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
   // Carga reactiva del diagrama y participantes desde el backend Spring Boot con caché L1/L2
   useEffect(() => {
     let isMounted = true;
+    if(!accountId)return;
     setIsLoadingDiagram(true);
     // Limpia el lienzo anterior para que el auto-ajuste se recalcule con la sala nueva
     setClasses([]);
@@ -431,7 +438,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
       setIsLoadingDiagram(false);
 
       // Actualizar caché para la siguiente alternancia de pantalla
-      if (loadedClasses.length > 0) {
+      if (loadedClasses.length >= 0) {
         diagramCacheService.saveCachedDiagram(cacheKey, {
           classes: loadedClasses,
           relationships: loadedRels,
@@ -446,7 +453,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
     return () => {
       isMounted = false;
     };
-  }, [roomId, projectId, cacheKey]);
+  }, [roomId, projectId, cacheKey,accountId]);
 
   // Auto-ajuste diferido: se dispara cuando las clases llegan realmente al estado.
   // Evita la closure obsoleta de `fitDiagram` (antes capturaba `classes = []` y el
@@ -478,19 +485,23 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
 
   // Conexión WebSocket STOMP y sincronización presencial de sala
   useEffect(() => {
-    mobileStomp.connect(() => {
+    const disposers:Array<()=>void>=[];let mounted=true;
+    void conversationApi.resolve(roomId,projectId,route.params?.diagramId).then(async session=>{
+      if(!mounted)return;setDiagramId(session.diagramId);
+      if(session.roomId!==roomId){navigation.setParams({roomId:session.roomId,diagramId:session.diagramId});return;}
+      const state=await conversationApi.state(roomId,session.diagramId!);if(mounted)setActiveGhostDraft(toGhostDraft(state.review,route.params?.proposalId));
+    }).catch(()=>{});
+    const announce=()=>{void readCurrentUser().then(user=>{if(mounted&&user){mobileStomp.sendJoin(roomId,{id:user.id,name:user.name||user.nombre,role:user.role});mobileStomp.sendSolicitarDiagrama(roomId);}});};
+    // Register subscriptions once. The shared transport restores them after reconnecting.
+    (() => {
       // 1. Anunciar presencia en la sala
-      mobileStomp.sendJoin(roomId, {
-        id: 'usr-mobile-01',
-        name: 'Desarrollador Móvil',
-        role: 'DESARROLLADOR_MOVIL',
-      });
+
 
       // 2. Solicitar al backend / anfitrión el diagrama activo en memoria
-      mobileStomp.sendSolicitarDiagrama(roomId);
+
 
       // 3. Suscribirse a eventos de colaboración (join/leave, nodo_mover y diagrama en tiempo real)
-      mobileStomp.subscribeRoomCollab(roomId, (msg) => {
+      disposers.push(mobileStomp.subscribeRoomCollab(roomId, (msg) => {
         if (!msg) return;
 
         const tipo = (msg.tipo || '').toLowerCase();
@@ -501,6 +512,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
           } catch {}
         }
 
+        if(tipo==='ia_draft_state'){setActiveGhostDraft(toGhostDraft(payload,route.params?.proposalId));return;}
         // A. Presencia: Join / Leave
         if (tipo === 'join' || tipo === 'leave' || tipo === 'salir') {
           if (payload && Array.isArray(payload.participantes)) {
@@ -556,7 +568,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
           try {
             const diagramData = payload.diagram || payload;
             const parsed = parseBackendDiagram(diagramData);
-            if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
+            if (parsed && Array.isArray(parsed.classes)) {
               const { classes: normClasses, offsetX, offsetY } = normalizeDiagramCoordinates(parsed.classes);
               diagramOffsetRef.current = { x: offsetX, y: offsetY };
               setRemoteDraggingNodes({});
@@ -569,37 +581,37 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
           }
           return;
         }
-      });
+      }));
 
       // 4. Suscripción dedicada al canal de presencia de sala
-      mobileStomp.subscribePresence(roomId, (presenceList) => {
+      disposers.push(mobileStomp.subscribePresence(roomId, (presenceList) => {
         if (Array.isArray(presenceList)) {
           setParticipants(presenceList);
         }
-      });
+      }));
 
       // 5. Suscripción a propuestas de copiloto fantasma (@ArchAI)
-      mobileStomp.subscribeGhostDrafts(roomId, (proposal) => {
+      disposers.push(mobileStomp.subscribeGhostDrafts(roomId, (proposal) => {
         // Blindaje: la propuesta remota puede llegar sin `classes`/`relationships`
         // (antes provocaba un crash al hacer spread de `undefined`).
         setActiveGhostDraft(normalizeGhostDraft(proposal));
-      });
+      }));
 
       // 6. Suscripción al chat para badge numérico reactivo en el visor
-      mobileStomp.subscribeChat(roomId, (incoming) => {
+      disposers.push(mobileStomp.subscribeChat(roomId, (incoming) => {
         if (incoming) {
           setUnreadChatCount((prev) => prev + 1);
         }
-      });
-    }).catch((err) => {
+      }));
+    })();
+    void mobileStomp.connect(announce).catch((err) => {
       // La sala sigue siendo navegable en modo lectura aunque el WebSocket no conecte.
       console.warn('[CanvasViewer] No se pudo abrir la conexión STOMP:', err);
     });
 
     return () => {
-      mobileStomp.sendLeave(roomId, { id: 'usr-mobile-01', name: 'Desarrollador Móvil' });
-      roomsApi.leaveRoom(roomId, 'usr-mobile-01').catch(() => {});
-      mobileStomp.disconnect();
+      mounted=false;disposers.forEach(remove=>remove());
+      void readCurrentUser().then(user=>{if(user){mobileStomp.sendLeave(roomId,{id:user.id,name:user.name||user.nombre});void roomsApi.leaveRoom(roomId,user.id);}});
     };
   }, [roomId]);
 
@@ -631,10 +643,8 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
 
   // Navegación de retorno al hub de salas con salida limpia de sesión
   const handleBackToRooms = useCallback(() => {
-    mobileStomp.sendLeave(roomId, { id: 'usr-mobile-01', name: 'Desarrollador Móvil' });
-    roomsApi.leaveRoom(roomId, 'usr-mobile-01').catch(() => {});
     navigation.goBack();
-  }, [roomId, navigation]);
+  }, [navigation]);
 
   return (
     <View style={styles.container}>
@@ -648,6 +658,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
         pinCopied={pinCopied}
         onBack={handleBackToRooms}
         onCopyPin={handleCopyPin}
+        onOpenNotifications={()=>navigation.navigate('Notifications')}
         onOpenParticipants={() => setParticipantsModalVisible(true)}
         onToggleSearch={() => {
           setIsSearchOpen((prev) => !prev);
@@ -658,6 +669,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
           navigation.navigate('Chat', {
             roomId,
             roomName,
+            diagramId,projectId,
             classes,
             relationships,
           });
@@ -685,12 +697,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
       {/* Floating Ghost Draft Banner */}
       <GhostDraftBanner
         proposal={activeGhostDraft}
-        onPress={() => {
-          const firstGhost = activeGhostDraft?.classes?.[0];
-          if (firstGhost) {
-            handleSelectClass(firstGhost);
-          }
-        }}
+        onPress={() => setProposalDetailsVisible(true)}
       />
 
       {/* Viewport Interactivo: gestos nativos en el hilo de UI */}
@@ -699,13 +706,14 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
           {/* Capa de Transformación del Lienzo (Pan 360° y Zoom Focal Libre) */}
           <Animated.View style={[styles.canvasWorld, worldStyle]} pointerEvents="box-none">
             {/* Capa de Relaciones Bézier Modular (cada relación con su propio SVG ligero) */}
-            <CanvasRelationLayer paths={computedRelationPaths} />
+            <CanvasRelationLayer paths={computedRelationPaths} deletionIds={new Set((activeGhostDraft?.deletions||[]).flatMap(d=>d.kind==='relation'?[d.targetId]:d.affectedRelationIds))}/>
 
             {/* Nodos de Clases UML */}
             {classes.map((c) => (
               <ClassCard
                 key={c.id}
                 model={c}
+                proposedDeletion={activeGhostDraft?.deletions?.some(d=>d.kind==='class'?d.targetId===c.id:d.classId===c.id)}
                 highlighted={highlightedClassId === c.id}
                 remoteDraggingUser={remoteDraggingNodes[c.id]?.name}
                 onSelect={handleSelectClass}
@@ -782,6 +790,8 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
         </View>
       </GestureDetector>
 
+      <ProposalDetailsModal proposal={activeGhostDraft} visible={proposalDetailsVisible} official={classes} onClose={()=>setProposalDetailsVisible(false)} onLocate={handleSpotlightSelect} onConversation={()=>navigation.navigate('Chat',{roomId,roomName,diagramId,projectId})}/>
+
       {/* Modal de Participantes en Vivo */}
       <RoomParticipantsModal
         visible={participantsModalVisible}
@@ -789,7 +799,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
         roomId={roomId}
         roomName={roomName}
         participants={participants}
-        currentUserId="usr-mobile-01"
+        currentUserId={accountId}
       />
 
       {/* Bottom Sheet Modal para inspección completa de clase */}

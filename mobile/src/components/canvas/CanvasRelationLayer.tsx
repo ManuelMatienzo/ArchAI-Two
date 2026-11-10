@@ -6,6 +6,7 @@ import { ComputedRelationshipPath } from '../../utils/diagramGeometry';
 
 interface CanvasRelationLayerProps {
   paths: ComputedRelationshipPath[];
+  deletionIds?:Set<string>;
 }
 
 /**
@@ -14,7 +15,7 @@ interface CanvasRelationLayerProps {
  * liviano (~1-2 MB de textura máxima). Esto elimina de raíz la asignación de mapas de bits
  * gigantescos (243 MB) en Android que provocaban 'Canvas: trying to draw too large bitmap'.
  */
-export const CanvasRelationLayer: React.FC<CanvasRelationLayerProps> = memo(({ paths }) => {
+export const CanvasRelationLayer: React.FC<CanvasRelationLayerProps> = memo(({ paths,deletionIds }) => {
   if (!paths || paths.length === 0) return null;
 
   return (
@@ -31,7 +32,7 @@ export const CanvasRelationLayer: React.FC<CanvasRelationLayerProps> = memo(({ p
         }
 
         const isGhost = r.isGhostDraft;
-        const strokeColor = isGhost ? colors.primary : colors.primary;
+        const strokeColor = deletionIds?.has(r.id) ? colors.error : colors.primary;
 
         // Marcador geométrico rotado según el ángulo de tangencia en el extremo destino (blindado contra NaN)
         const safeAngle = Number.isFinite(r.angle) ? r.angle : 0;

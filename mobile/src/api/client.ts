@@ -24,6 +24,8 @@ export const getAutoDetectedHost = (): string => {
 };
 
 export const getDefaultBackendUrl = (): string => {
+  const configured=process.env.EXPO_PUBLIC_ARCHAI_API_URL;
+  if(configured)return configured.replace(/\/$/,'');
   const host = getAutoDetectedHost();
   return `http://${host}:8000/api/v1`;
 };
@@ -44,7 +46,10 @@ export const getBackendUrl = async (): Promise<string> => {
 };
 
 export const setBackendUrl = async (url: string): Promise<void> => {
-  await AsyncStorage.setItem('archai_backend_url', url);
+  let value=url.trim().replace(/\/$/,'');
+  if(!/^https?:\/\//i.test(value))throw new Error('Usa una dirección http:// o https:// válida.');
+  if(!value.endsWith('/api/v1'))value+='/api/v1';
+  await AsyncStorage.setItem('archai_backend_url', value);
 };
 
 export const getAuthToken = async (): Promise<string | null> => {
@@ -54,6 +59,10 @@ export const getAuthToken = async (): Promise<string | null> => {
 export const setAuthToken = async (token: string): Promise<void> => {
   await AsyncStorage.setItem('archai_jwt_token', token);
 };
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
 
 export const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<any> => {
   const baseUrl = await getBackendUrl();
@@ -84,10 +93,11 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}): Pro
           errorMsg = await response.text();
         } catch {}
       }
-      throw new Error(errorMsg || `Error ${response.status}`);
+      throw new ApiError(response.status, errorMsg || `Error ${response.status}`);
     }
 
-    return await response.json();
+    if(response.status===204)return undefined;
+    const content=await response.text();return content?JSON.parse(content):undefined;
   } catch (err: any) {
     // Si la conexión falló a nivel de socket/red, formatear mensaje limpio sin stack trace Java
     if (
@@ -95,7 +105,7 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}): Pro
       err?.message?.includes('Network request failed') ||
       err?.message?.includes('Failed to connect')
     ) {
-      throw new Error('No se pudo conectar con el servidor. Verifica que tu teléfono y PC compartan la misma red Wi-Fi.');
+      throw new ApiError(0, 'No se pudo conectar con el servidor. Revisa la conexión y la dirección configurada.');
     }
     throw err;
   }

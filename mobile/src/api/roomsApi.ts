@@ -37,6 +37,8 @@ export interface RoomParticipant {
 }
 
 export interface InfoSesionDto {
+  diagramId?:string;
+  projectId?:string;
   roomId: string;
   roomName: string;
   hostName: string;
@@ -240,15 +242,7 @@ export const roomsApi = {
         return parseBackendDiagram(roomDiagram);
       }
 
-      // 3. Si la sala no tiene clases en memoria, consultar si existe un diagrama persistido
-      const allDiagrams = await apiFetch('/diagramas');
-      if (Array.isArray(allDiagrams) && allDiagrams.length > 0) {
-        const populatedDiagram = allDiagrams.find((d: any) => d.classes && d.classes.length > 0) || allDiagrams[0];
-        if (populatedDiagram && Array.isArray(populatedDiagram.classes) && populatedDiagram.classes.length > 0) {
-          return parseBackendDiagram(populatedDiagram);
-        }
-      }
-
+      // Never fall back to an unrelated project's global diagram.
       return { classes: [], relationships: [] };
     } catch (err) {
       console.warn('Error al obtener diagrama de sala desde backend:', err);

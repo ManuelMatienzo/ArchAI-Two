@@ -1,3 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { enablePush, disablePush, pushEnabled as readPushEnabled } from '../services/notificationsService';
+import { mobileStomp } from '../api/stompClient';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, Alert, ActivityIndicator } from 'react-native';
 import { Server, Cloud, Save, Wifi, CheckCircle2, AlertCircle } from 'lucide-react-native';
@@ -8,7 +11,10 @@ export const SettingsScreen = ({ navigation }: any) => {
   const [serverUrl, setServerUrl] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [pushEnabled, setPushEnabled] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [changingPush,setChangingPush]=useState(false);
+  useEffect(()=>{void readPushEnabled().then(setPushEnabled);void AsyncStorage.getItem('archai_offline_enabled').then(v=>setOfflineCacheEnabled(v!=='false'));},[]);
+  const togglePush=async(enabled:boolean)=>{setChangingPush(true);try{if(enabled)await enablePush();else await disablePush();setPushEnabled(enabled);}catch(e){Alert.alert('Notificaciones',e instanceof Error?e.message:'No se pudo actualizar el permiso.');}finally{setChangingPush(false);}};
   const [offlineCacheEnabled, setOfflineCacheEnabled] = useState(true);
 
   useEffect(() => {
@@ -22,15 +28,17 @@ export const SettingsScreen = ({ navigation }: any) => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${serverUrl.trim()}/auth/check`, {
+      const candidate=serverUrl.trim().replace(/\/$/,'');
+      const url=candidate.endsWith('/api/v1')?candidate:`${candidate}/api/v1`;
+      const res = await fetch(`${url}/auth/status`, {
         signal: controller.signal,
       }).catch(() => null);
       clearTimeout(timeoutId);
 
-      if (res && res.status < 500) {
+      if (res && res.ok) {
         setTestResult({ ok: true, message: 'Conexión exitosa con el backend.' });
       } else {
-        setTestResult({ ok: true, message: 'Servidor alcanzable en la red.' });
+        setTestResult({ ok: false, message: 'El servidor no respondió correctamente. Revisa la dirección.' });
       }
     } catch {
       setTestResult({ ok: false, message: 'No se pudo conectar al endpoint configurado.' });
@@ -44,7 +52,7 @@ export const SettingsScreen = ({ navigation }: any) => {
       Alert.alert('URL requerida', 'Por favor ingresa la URL del backend.');
       return;
     }
-    await setBackendUrl(serverUrl.trim());
+    try{await setBackendUrl(serverUrl.trim());mobileStomp.disconnect();}catch(e){Alert.alert('Servidor',e instanceof Error?e.message:'Dirección inválida.');return;}
     Alert.alert('Guardado', 'La configuración del servidor ha sido actualizada exitosamente.');
     navigation.goBack();
   };
@@ -139,12 +147,13 @@ export const SettingsScreen = ({ navigation }: any) => {
       <View style={styles.card}>
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.switchTitle}>Notificaciones Push (Web Push VAPID)</Text>
-            <Text style={styles.switchDesc}>Recibir alertas ante propuestas de la IA y eventos de compilación</Text>
+            <Text style={styles.switchTitle}>Notificaciones de ArchAI</Text>
+            <Text style={styles.switchDesc}>Propuestas, decisiones, cambios del diagrama y menciones importantes</Text>
           </View>
           <Switch
             value={pushEnabled}
-            onValueChange={setPushEnabled}
+            disabled={changingPush}
+            onValueChange={value=>void togglePush(value)}
             thumbColor={pushEnabled ? colors.primary : '#4b5563'}
             trackColor={{ false: '#374151', true: 'rgba(56, 189, 248, 0.4)' }}
           />
@@ -152,18 +161,19 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         <View style={[styles.switchRow, { borderTopWidth: 1, borderTopColor: colors.borderGlass, paddingTop: 14, marginTop: 14 }]}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.switchTitle}>Caché Offline (IndexedDB / Storage)</Text>
+            <Text style={styles.switchTitle}>Consulta sin conexión</Text>
             <Text style={styles.switchDesc}>Guardar último diagrama para visualización en vuelos o sin red</Text>
           </View>
           <Switch
             value={offlineCacheEnabled}
-            onValueChange={setOfflineCacheEnabled}
+            onValueChange={value=>{setOfflineCacheEnabled(value);void AsyncStorage.setItem('archai_offline_enabled',String(value));}}
             thumbColor={offlineCacheEnabled ? colors.primary : '#4b5563'}
             trackColor={{ false: '#374151', true: 'rgba(56, 189, 248, 0.4)' }}
           />
         </View>
       </View>
 
+      <TouchableOpacity style={styles.saveBtn} onPress={()=>navigation.navigate('Notifications')}><Text style={styles.saveBtnText}>Ver actividad del equipo</Text></TouchableOpacity>
       {/* Save Button */}
       <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
         <Save size={16} color={colors.textOnPrimary} style={{ marginRight: 6 }} />

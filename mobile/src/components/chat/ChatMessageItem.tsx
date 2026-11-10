@@ -19,10 +19,11 @@ import {
 } from 'lucide-react-native';
 import { CollabMessage } from '../../types/uml';
 import { colors } from '../../theme/colors';
+import { NativeChatText } from './NativeChatText';
 
 interface ChatMessageItemProps {
   item: CollabMessage;
-  currentUser: { name: string; role: string };
+  currentUser: { id?:string;name: string; role: string };
 }
 
 const getRoleBadgeInfo = (role?: string) => {
@@ -50,7 +51,7 @@ const getRoleBadgeInfo = (role?: string) => {
       };
     default:
       return {
-        label: 'Ing. Móvil',
+        label: 'Colaborador',
         bg: 'rgba(52, 211, 153, 0.15)',
         border: 'rgba(52, 211, 153, 0.40)',
         color: '#34d399',
@@ -78,12 +79,12 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = memo(({
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const isMyMessage =
+  const isMyMessage = item.authorId ? item.messageRole==='human'&&item.authorId===currentUser.id :
     item.sender === currentUser.name ||
     item.senderRole === 'DESARROLLADOR_MOVIL' ||
     item.senderRole === 'Desarrollador Móvil';
 
-  const isAi =
+  const isAi = item.messageRole ? item.messageRole==='ai' :
     item.isAiResponse ||
     item.senderRole === 'ARCHAI_IA' ||
     item.senderRole === 'Agente IA Co-Developer' ||
@@ -191,9 +192,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = memo(({
         </View>
 
         {/* Contenido del texto */}
-        <Text style={[styles.msgContent, isAi && styles.aiMsgContent]}>
-          {item.content}
-        </Text>
+        <NativeChatText text={item.content}/>
 
         {/* Bloque de código si estuviese adjunto */}
         {item.codeSnippet && (

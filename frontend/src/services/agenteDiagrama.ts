@@ -1,8 +1,7 @@
 import { ClaseUml, RelacionUml, AtributoUml, MetodoUml, TipoRelacion, ModeloDiagrama } from '../types/uml';
 import { normalizeType, capitalize } from './aiVoiceParser';
-import { verificarEstadoOllama } from './ollamaService';
 import { inferirTablaIntermedia, inferirDireccionMaestroTransaccion, CATALOGO_DOMINIOS, sanitizarDiagramaUML25, esClaseAsociativaUniversal } from './semanticDomainEngine';
-import { geminiDisponible, generarContenidoGemini, MODELO_GEMINI } from './geminiService';
+import { geminiDisponible, generarContenidoGemini, MODELO_GEMINI, ultimoProveedorIa } from './geminiService';
 
 /**
  * ─────────────────────────────────────────────────────────────
@@ -27,13 +26,14 @@ export interface ResultadoAgente {
   success: boolean;
   diagrama?: DiagramaGenerado;
   error?: string;
-  fuente: 'gemini' | 'ollama' | 'error';
+  fuente: 'gemini' | 'claude' | 'ollama' | 'error';
   model?: string;
 }
 
 interface RespuestaOllama {
   diagrama: DiagramaGenerado;
   model: string;
+  provider?:string;
 }
 
 /** Tipos permitidos en la generación */
@@ -668,29 +668,6 @@ export function normalizarDiagrama(
   };
 }
 
-const ENDPOINTS_CHAT = ['/api/ollama/api/chat', 'http://127.0.0.1:11434/api/chat'];
-
-/**
- * Modelos que fallaron por memoria/crash en esta sesión (p. ej. 3b con poca RAM).
- * Se omiten en llamadas posteriores para no repetir el intento que crashea llama-server.
- */
-const modelosFallidos = new Set<string>();
-
-function esFalloMemoria(texto: string): boolean {
-  return /out-of-memory|cudaMalloc|llama-server.*terminated|stack-based buffer|OOM/i.test(texto || '');
-}
-
-/**
- * Pide a Ollama un diagrama UML completo en JSON para el prompt dado.
- * Recorre candidatos de modelo en orden de capacidad (adaptativo a la RAM disponible):
- *   qwen2.5:3b → qwen2.5:1.5b → qwen2.5:0.5b
- * @returns Diagrama normalizado + modelo usado, o null si todos los modelos fallaron.
- */
-/**
- * Pide a Gemini (nube) el diagrama completo en JSON forzado
- * (responseMimeType: application/json). Devuelve null si no hay clave,
- * falla la red, o el JSON no es normalizable.
- */
 async function pedirDiagramaGemini(
   prompt: string,
   systemPrompt: string,
@@ -712,104 +689,14 @@ async function pedirDiagramaGemini(
   try {
     const parsed = JSON.parse(jsonStr);
     const normalizado = normalizarDiagrama(parsed, []);
-    if (normalizado) return { diagrama: normalizado, model: MODELO_GEMINI };
+    if (normalizado) return { diagrama: normalizado, model: MODELO_GEMINI,provider:ultimoProveedorIa() };
   } catch {
     /* JSON inválido → devolver null para seguir con Ollama */
   }
   return null;
 }
 
-export async function pedirDiagramaOllama(
-  prompt: string,
-  systemPrompt: string,
-  modeloSugerido?: string,
-  timeoutMs = 120000
-): Promise<RespuestaOllama | null> {
-  // 1) Motor principal en la nube: Gemini (tokens, sin RAM local) si hay clave
-  if (geminiDisponible()) {
-    const respGemini = await pedirDiagramaGemini(prompt, systemPrompt, timeoutMs);
-    if (respGemini) return respGemini;
-  }
-
-  // 2) Fallback local: cadena adaptativa qwen2.5 (3b > 1.5b > 0.5b)
-  // Candidatos de modelo: primero el sugerido, después por capacidad (3b > 1.5b > 0.5b)
-  let instalados: string[] = [];
-  try {
-    const status = await verificarEstadoOllama();
-    instalados = status.models || [];
-  } catch {
-    /* sin catálogo accesible: probar con nombres conocidos (el POST fallará si está offline) */
-  }
-  if (instalados.length === 0) {
-    instalados = ['qwen2.5:3b', 'qwen2.5:1.5b', 'qwen2.5:0.5b'];
-  }
-
-  const preferencia = ['qwen2.5:14b', 'qwen2.5:7b', 'qwen2.5:3b', 'qwen2.5:1.5b', 'qwen2.5:0.5b'];
-  const candidatos: string[] = [];
-  if (modeloSugerido && instalados.includes(modeloSugerido)) candidatos.push(modeloSugerido);
-  preferencia.forEach(m => { if (instalados.includes(m) && !candidatos.includes(m)) candidatos.push(m); });
-  instalados.forEach(m => { if (!candidatos.includes(m)) candidatos.push(m); });
-  // Omitir modelos que ya crashearon por memoria en esta sesión
-  const aProbar = candidatos.filter(m => !modelosFallidos.has(m)).slice(0, 3);
-  if (aProbar.length === 0) return null;
-
-  for (const model of aProbar) {
-    const payload = {
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt }
-      ],
-      stream: false,
-      format: 'json' as const,
-      options: {
-        temperature: 0.2,
-        num_ctx: 2048,
-        num_predict: 1500,
-        num_gpu: 0 // CPU estable: la iGPU/VRAM compartida se queda sin memoria con modelos grandes
-      }
-    };
-
-    for (const ep of ENDPOINTS_CHAT) {
-      try {
-        const controller = new AbortController();
-        const tid = setTimeout(() => controller.abort(), timeoutMs);
-        const res = await fetch(ep, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
-        clearTimeout(tid);
-
-        if (!res.ok) {
-          // Detectar fallos permanentes de memoria/crash para omitir el modelo después
-          try {
-            const errText = await res.text();
-            if (esFalloMemoria(errText)) modelosFallidos.add(model);
-          } catch {
-            /* sin cuerpo de error */
-          }
-          continue;
-        }
-        const data = await res.json();
-        const content = String(data?.message?.content || data?.response || '').trim();
-        if (!content) continue;
-
-        const jsonStr = extraerJSON(content);
-        if (!jsonStr) continue;
-
-        const parsed = JSON.parse(jsonStr);
-        const normalizado = normalizarDiagrama(parsed, []);
-        if (normalizado) return { diagrama: normalizado, model };
-      } catch {
-        /* modelo o endpoint falló → probar siguiente */
-      }
-    }
-  }
-
-  return null;
-}
+export async function pedirDiagramaOllama(prompt:string,systemPrompt:string,_modeloSugerido?:string,timeoutMs=120000):Promise<RespuestaOllama|null>{return pedirDiagramaGemini(prompt,systemPrompt,timeoutMs);}
 
 /**
  * Orquestador de GENERACIÓN: crea un diagrama nuevo desde un prompt libre.
@@ -826,7 +713,7 @@ export async function generarDiagramaConAgente(
   const resp = await pedirDiagramaOllama(prompt, construirSystemPrompt(contextoUml), modeloOllama);
 
   if (resp) {
-    return { success: true, diagrama: resp.diagrama, fuente: resp.model === MODELO_GEMINI ? 'gemini' : 'ollama', model: resp.model };
+    return { success: true, diagrama: resp.diagrama, fuente: resp.provider==='Ollama'?'ollama':resp.provider==='Claude'?'claude':'gemini', model: resp.model };
   }
 
   return {
@@ -850,7 +737,7 @@ export async function modificarDiagramaConAgente(
   const resp = await pedirDiagramaOllama(prompt, systemPrompt, modeloOllama);
 
   if (resp) {
-    return { success: true, diagrama: resp.diagrama, fuente: resp.model === MODELO_GEMINI ? 'gemini' : 'ollama', model: resp.model };
+    return { success: true, diagrama: resp.diagrama, fuente: resp.provider==='Ollama'?'ollama':resp.provider==='Claude'?'claude':'gemini', model: resp.model };
   }
 
   return {

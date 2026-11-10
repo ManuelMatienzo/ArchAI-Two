@@ -22,6 +22,10 @@
     </properties>
     
     <dependencies>
+        <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>mongodb-driver-sync</artifactId>
+        </dependency>
         <!-- Spring Boot Web -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -89,6 +93,13 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>"-javaagent:${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy.version}/byte-buddy-agent-${byte-buddy.version}.jar"</argLine>
+                    <includes>
+                        <include>**/Test*.java</include>
+                        <include>**/*Test.java</include>
+                        <include>**/*Tests.java</include>
+                        <include>**/*TestCase.java</include>
+                        <include>**/PruebasIntegracionCasosUso.java</include>
+                    </includes>
                 </configuration>
             </plugin>
             <plugin>

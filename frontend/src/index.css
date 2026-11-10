@@ -1571,7 +1571,7 @@ h1, h2, h3, h4, h5, h6 {
     bottom: 12px !important;
     padding: 5px 8px !important;
     gap: 4px !important;
-    max-width: calc(100vw - 16px) !important;
+    max-width: calc(100% - 16px) !important;
   }
   .glass-code-dock {
     width: 100vw !important;

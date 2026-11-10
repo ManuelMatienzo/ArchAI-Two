@@ -12,6 +12,7 @@ import {
   Users,
   Search,
   MessageSquare,
+  Bell,
 } from 'lucide-react-native';
 import { colors } from '../../theme/colors';
 
@@ -27,6 +28,7 @@ export interface CanvasHeaderProps {
   onOpenParticipants: () => void;
   onToggleSearch: () => void;
   onOpenChat: () => void;
+  onOpenNotifications?:()=>void;
 }
 
 /**
@@ -47,6 +49,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = React.memo(
     onOpenParticipants,
     onToggleSearch,
     onOpenChat,
+    onOpenNotifications,
   }) => {
     return (
       <View style={styles.header}>
@@ -110,6 +113,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = React.memo(
             <Search size={15} color={colors.primary} />
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.searchBtn} onPress={onOpenNotifications} accessibilityLabel="Ver actividad del equipo"><Bell size={15} color={colors.primary}/></TouchableOpacity>
           {/* Botón de Chat con Contador Reactivo de No Leídos */}
           <TouchableOpacity
             style={styles.chatBtn}

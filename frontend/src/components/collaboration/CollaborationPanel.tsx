@@ -19,10 +19,7 @@ export const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [estadoConexion, setEstadoConexion] = useState<'conectando' | 'conectado' | 'simulado'>('conectando');
-  const [events, setEvents] = useState<string[]>([
-    'Sesión WebSocket inicializada con broker STOMP.',
-    'Anfitrión configuró el diagrama UML 2.5 en tiempo real.'
-  ]);
+  const [events,setEvents]=useState<string[]>([]);
   const stompRef = useRef<ClienteStomp | null>(null);
 
   const copyShareLink = () => {
@@ -74,7 +71,7 @@ export const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
       .catch(() => {
         if (!activo) return;
         setEstadoConexion('simulado');
-        agregarEvento('Backend sin conexión: se muestra actividad simulada del equipo.');
+        agregarEvento('No se pudo conectar con la sala. Intenta reconectar.');
       });
 
     return () => {
@@ -84,22 +81,6 @@ export const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.roomId, session.currentUser.id, session.currentUser.name]);
-
-  // Simulación de actividad sólo cuando el broker STOMP no está disponible
-  useEffect(() => {
-    if (estadoConexion !== 'simulado') return;
-    const timer = setInterval(() => {
-      const simulatedActions = [
-        'Dra. Elena Ramos validó la normalización 3FN.',
-        'Ing. Lucas Vaca mapeó relaciones JPA 1:N.',
-        'Sincronización de AST UML completada en el canal /topic/diagram.',
-        'Ingeniero de Datos verificó integridad referencial de claves.'
-      ];
-      const randomAction = simulatedActions[Math.floor(Math.random() * simulatedActions.length)];
-      setEvents(prev => [randomAction, ...prev.slice(0, 4)]);
-    }, 14000);
-    return () => clearInterval(timer);
-  }, [estadoConexion]);
 
   return (
     <div className="glass-card" style={{
@@ -164,7 +145,7 @@ export const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
               ? 'STOMP en vivo'
               : estadoConexion === 'conectando'
                 ? 'Conectando al broker...'
-                : 'Simulación local (backend sin conexión)'}
+                : 'Sin conexión'}
           </span>
         </div>
         <button

@@ -1,5 +1,6 @@
 import { ModeloDiagrama } from '../types/uml';
 import { InformacionSesion, PerfilUsuario } from '../types/auth';
+import { activeRoomContext } from './activeRoom';
 
 /**
  * Cliente API central de ArchAI.
@@ -34,11 +35,17 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   } catch (err: any) {
     throw new ApiError(
       0,
-      `No se pudo conectar con el servidor backend en ${API_BASE_URL}. Asegúrate de que el backend Spring Boot esté corriendo (ejecuta: .\\mvnw.cmd spring-boot:run)`
+      'No se pudo conectar con el servidor. Intenta de nuevo más tarde.'
     );
   }
 
   if (!res.ok) {
+    // An old request must never invalidate a more recent login.
+    if (res.status === 401 && token && localStorage.getItem('archai_token') === token) {
+      localStorage.removeItem('archai_token');
+      localStorage.removeItem('archai_session');
+      window.dispatchEvent(new Event('archai-session-expired'));
+    }
     let mensaje = `Error del servidor (${res.status})`;
     try {
       const cuerpo = await res.json();
@@ -66,11 +73,11 @@ export async function verificarConexionBackend(): Promise<{ online: boolean; men
     clearTimeout(timeoutId);
     if (res.ok) {
       const txt = await res.text();
-      return { online: true, mensaje: txt || 'Backend Spring Boot activo en http://localhost:8000' };
+      return { online: true, mensaje: txt || 'ArchAI disponible.' };
     }
     return { online: true, mensaje: `Servidor respondiendo (${res.status})` };
   } catch {
-    return { online: false, mensaje: 'Backend no detectado en http://localhost:8000' };
+    return { online: false, mensaje: 'No se pudo conectar con el servidor.' };
   }
 }
 
@@ -329,8 +336,10 @@ export function procesarOcrPizarra(archivo: File, titulo?: string, onProgress?: 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE_URL}/api/v1/ia/ocr-pizarra`);
+    const token=localStorage.getItem('archai_token');if(token)xhr.setRequestHeader('Authorization',`Bearer ${token}`);
     const form = new FormData();
     form.append('archivo', archivo);
+    const context=activeRoomContext();if(context.roomId)form.append('roomId',context.roomId);if(context.diagramId)form.append('diagramId',context.diagramId);
     if (titulo) form.append('titulo', titulo);
     if (onProgress) {
       xhr.upload.onprogress = e => {
@@ -401,7 +410,7 @@ export function exportarXmi(diagram: ModeloDiagrama): Promise<string> {
 async function apiFetchText(path: string, body: string): Promise<string> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('archai_token')?{Authorization:`Bearer ${localStorage.getItem('archai_token')}`}:{}) },
     body
   });
   if (!res.ok) {
@@ -445,7 +454,7 @@ export function eliminarGeneracionHistorial(id: string): Promise<void> {
 export function descargarZipApi(diagram: ModeloDiagrama): Promise<Blob> {
   return fetch(`${API_BASE_URL}/api/v1/generator/zip`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('archai_token')?{Authorization:`Bearer ${localStorage.getItem('archai_token')}`}:{}) },
     body: JSON.stringify(construirPayloadDiagrama(diagram))
   }).then(async res => {
     if (!res.ok) throw new ApiError(res.status, 'No se pudo descargar el ZIP');

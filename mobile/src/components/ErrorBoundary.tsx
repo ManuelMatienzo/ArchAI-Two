@@ -24,7 +24,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidMount() {
-    const globalAny = global as any;
+    const globalAny = globalThis as any;
     if (globalAny?.ErrorUtils?.setGlobalHandler) {
       const defaultHandler = globalAny.ErrorUtils.getGlobalHandler?.();
       globalAny.ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {

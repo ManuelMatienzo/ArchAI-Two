@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { InformacionSesion } from './types/auth';
 import { ModeloDiagrama } from './types/uml';
@@ -41,6 +41,17 @@ export default function App() {
     }
     return undefined;
   });
+
+  useEffect(() => {
+    const expired = () => {
+      setSession(null);
+      setSelectedDiagram(undefined);
+      setSelectedProjectTitle(undefined);
+      setSelectedDiagramId(undefined);
+    };
+    window.addEventListener('archai-session-expired', expired);
+    return () => window.removeEventListener('archai-session-expired', expired);
+  }, []);
 
   const handleLoginSuccess = (sesion: InformacionSesion, targetView?: 'proyectos' | 'estudio') => {
     setSession(sesion);

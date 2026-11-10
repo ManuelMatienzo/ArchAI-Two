@@ -1,3 +1,5 @@
+import { disablePush } from '../services/notificationsService';
+import { mobileStomp } from '../api/stompClient';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -11,6 +13,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Radio, Folder } from 'lucide-react-native';
 import { colors } from '../theme/colors';
+import { conversationApi } from '../api/conversationApi';
 import { roomsApi, RoomItem, ProjectItem } from '../api/roomsApi';
 import {
   RoomsUserBar,
@@ -171,12 +174,9 @@ export const RoomsScreen = ({ navigation }: any) => {
   };
 
   // Selección de proyecto: abre el visor de canvas pasando projectId para cargar su diagrama
-  const handleSelectProject = (project: ProjectItem) => {
-    navigation.navigate('CanvasViewer', {
-      roomId: project.codigoAcceso,
-      roomName: project.nombre,
-      projectId: project.id,
-    });
+  const handleSelectProject = async(project:ProjectItem)=>{
+    try {const session=await conversationApi.resolve(undefined,project.id);navigation.navigate('CanvasViewer',{roomId:session.roomId,roomName:session.roomName,projectId:project.id,diagramId:session.diagramId});}
+    catch(e){setProjectErrorMessage(e instanceof Error?e.message:'No se pudo abrir el proyecto.');}
   };
 
   // Unirse a sala por PIN
@@ -198,7 +198,7 @@ export const RoomsScreen = ({ navigation }: any) => {
       fetchActiveRooms();
       navigation.navigate('CanvasViewer', {
         roomId: session.roomId || finalPin,
-        roomName: session.roomName || `Sala ${finalPin}`,
+        roomName: session.roomName || `Sala ${finalPin}`,diagramId:session.diagramId,projectId:session.projectId,
       });
     } catch (err: any) {
       setJoinRoomErrorMessage(err.message || 'No se pudo conectar con la sala. Verifica el PIN.');
@@ -246,6 +246,8 @@ export const RoomsScreen = ({ navigation }: any) => {
   };
 
   const handleLogout = async () => {
+    try{await disablePush();}catch{}
+    mobileStomp.disconnect();
     await AsyncStorage.removeItem('archai_session');
     await AsyncStorage.removeItem('archai_jwt_token');
     navigation.replace('Login');

@@ -2,15 +2,17 @@ package com.archai.modulo.colaboracion.dto;
 
 import com.archai.modulo.autenticacion.dto.PerfilUsuarioDto;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import lombok.*;
-
 import java.util.List;
+import lombok.*;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class InfoSesionDto {
+
+    private String diagramId;
+    private String projectId;
 
     @JsonProperty("roomId")
     private String roomId;

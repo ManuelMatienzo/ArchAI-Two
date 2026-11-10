@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,510 +7,382 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  TouchableOpacity,
+  TextInput,
+  AppState,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Users, Sparkles } from 'lucide-react-native';
+import { randomUUID } from 'expo-crypto';
+import { Bot, RefreshCw } from 'lucide-react-native';
 import { colors } from '../theme/colors';
-import {
-  CollabMessage,
-  StompConnectionStatus,
-  UmlClass,
-  UmlRelationship,
-} from '../types/uml';
+import { CollabMessage, StompConnectionStatus } from '../types/uml';
 import { mobileStomp } from '../api/stompClient';
-import { auditUmlModel } from '../utils/umlAuditor';
+import { ApiError } from '../api/client';
+import { conversationApi, mergeRoomMessages, readCurrentUser, RoomMessage } from '../api/conversationApi';
 import { ChatHeader } from '../components/chat/ChatHeader';
 import { ChatMessageItem } from '../components/chat/ChatMessageItem';
 import { QuickPromptsBar } from '../components/chat/QuickPromptsBar';
 import { ChatInputRow } from '../components/chat/ChatInputRow';
 
-const DEFAULT_CLASSES: UmlClass[] = [
-  {
-    id: 'c1',
-    name: 'Cliente',
-    stereotype: 'Entity',
-    tableName: 'clientes',
-    x: 60,
-    y: 80,
-    width: 200,
-    height: 180,
-    attributes: [
-      { id: 'a1', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a2', name: 'dniRuc', type: 'String', visibility: '-' },
-      { id: 'a3', name: 'nombre', type: 'String', visibility: '-' },
-      { id: 'a4', name: 'email', type: 'String', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm1', name: 'validarIdentidad', returnType: 'boolean', visibility: '+' },
-    ],
-  },
-  {
-    id: 'c2',
-    name: 'Venta',
-    stereotype: 'Entity',
-    tableName: 'ventas',
-    x: 350,
-    y: 80,
-    width: 200,
-    height: 180,
-    attributes: [
-      { id: 'a5', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a6', name: 'codigoFactura', type: 'String', visibility: '-' },
-      { id: 'a7', name: 'clienteId', type: 'Long', visibility: '-', isForeignKey: true },
-      { id: 'a8', name: 'totalVenta', type: 'BigDecimal', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm2', name: 'calcularTotal', returnType: 'BigDecimal', visibility: '+' },
-    ],
-  },
-  {
-    id: 'c3',
-    name: 'Producto',
-    stereotype: 'Entity',
-    tableName: 'productos',
-    x: 60,
-    y: 340,
-    width: 190,
-    height: 175,
-    attributes: [
-      { id: 'a10', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a11', name: 'sku', type: 'String', visibility: '-', isUnique: true },
-      { id: 'a12', name: 'precio', type: 'BigDecimal', visibility: '-' },
-      { id: 'a13', name: 'stockActual', type: 'Integer', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm4', name: 'descontarStock', returnType: 'void', visibility: '+' },
-    ],
-  },
-  {
-    id: 'c4',
-    name: 'DetalleVenta',
-    stereotype: 'Entity',
-    tableName: 'detalles_venta',
-    x: 350,
-    y: 340,
-    width: 200,
-    height: 175,
-    attributes: [
-      { id: 'a14', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a15', name: 'ventaId', type: 'Long', visibility: '-', isForeignKey: true },
-      { id: 'a16', name: 'productoId', type: 'Long', visibility: '-', isForeignKey: true },
-      { id: 'a17', name: 'cantidad', type: 'Integer', visibility: '-' },
-      { id: 'a18', name: 'subtotal', type: 'BigDecimal', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm5', name: 'calcularSubtotal', returnType: 'BigDecimal', visibility: '+' },
-    ],
-  },
-];
-
-const DEFAULT_RELATIONSHIPS: UmlRelationship[] = [
-  {
-    id: 'r1',
-    sourceId: 'c1',
-    targetId: 'c2',
-    type: 'association',
-    sourceMultiplicity: '1',
-    targetMultiplicity: '0..*',
-    name: 'genera',
-  },
-  {
-    id: 'r2',
-    sourceId: 'c2',
-    targetId: 'c4',
-    type: 'composition',
-    sourceMultiplicity: '1',
-    targetMultiplicity: '1..*',
-    name: 'contiene',
-  },
-  {
-    id: 'r3',
-    sourceId: 'c3',
-    targetId: 'c4',
-    type: 'association',
-    sourceMultiplicity: '1',
-    targetMultiplicity: '0..*',
-    name: 'incluido en',
-  },
-];
-
+const invokesAI = (text: string) => /(^|[^\w])@archai(?![\w])/i.test(text);
 export const ChatScreen = ({ route, navigation }: any) => {
-  const {
-    roomId = 'ARC-1029',
-    roomName = 'Sala de Co-Diseño',
-    classes: routeClasses = [],
-    relationships: routeRelationships = [],
-  } = route.params || {};
-
-  const activeClasses: UmlClass[] =
-    routeClasses && routeClasses.length > 0 ? routeClasses : DEFAULT_CLASSES;
-  const activeRelationships: UmlRelationship[] =
-    routeRelationships && routeRelationships.length > 0
-      ? routeRelationships
-      : DEFAULT_RELATIONSHIPS;
-
-  const flatListRef = useRef<FlatList<CollabMessage>>(null);
-  const inputRef = useRef<any>(null);
-
-  const [inputMessage, setInputMessage] = useState('');
-  const [isInputFocused, setIsInputFocused] = useState(false);
-  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [isAiThinking, setIsAiThinking] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<StompConnectionStatus>('desconectado');
-  const [currentUser, setCurrentUser] = useState<{ name: string; role: string }>({
-    name: 'Tú (Móvil)',
-    role: 'Desarrollador Móvil',
-  });
-
-  const [messages, setMessages] = useState<CollabMessage[]>([
-    {
-      id: 'm1',
-      sender: 'Carlos (Líder)',
-      senderRole: 'ARQUITECTO',
-      content: 'Acabo de modelar Cliente y Venta con sus respectivas llaves.',
-      timestamp: '10:14',
-      roomId,
-      status: 'entregado',
-    },
-    {
-      id: 'm2',
-      sender: 'Andrea (Revisor)',
-      senderRole: 'REVISOR',
-      content: '¿No deberíamos desacoplar DetalleVenta como clase asociativa?',
-      timestamp: '10:15',
-      roomId,
-      status: 'entregado',
-    },
-    {
-      id: 'm3',
-      sender: 'ArchAI Assistant',
-      senderRole: 'ARCHAI_IA',
-      content: 'Correcto Andrea. Bajo la 3FN, DetalleVenta debe registrar precioUnitario inmutable para conservar el historial fiscal sin dependencias transitivas.',
-      timestamp: '10:16',
-      isAiResponse: true,
-      roomId,
-      status: 'entregado',
-    },
-    {
-      id: 'm4',
-      sender: 'Carlos (Líder)',
-      senderRole: 'ARQUITECTO',
-      content: 'De acuerdo. Comparto la estructura SQL base para validación del equipo:',
-      timestamp: '10:17',
-      roomId,
-      status: 'entregado',
-      codeSnippet: {
-        language: 'sql',
-        title: 'schema_cliente.sql',
-        code: 'CREATE TABLE clientes (\n    id BIGSERIAL PRIMARY KEY,\n    dni_ruc VARCHAR(20) NOT NULL UNIQUE,\n    nombre VARCHAR(120) NOT NULL\n);',
-      },
-    },
-  ]);
-
-  // Cargar perfil autenticado
+  const { roomId, roomName = 'Equipo & ArchAI', diagramId: initialId, projectId } = route.params || {};
+  const [diagramId, setDiagramId] = useState<string | undefined>(initialId),
+    [messages, setMessages] = useState<RoomMessage[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null),
+    [inputMessage, setInputMessage] = useState(''),
+    [error, setError] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState<StompConnectionStatus>(mobileStomp.getStatus());
+  const [isInputFocused, setInputFocused] = useState(false),
+    [isKeyboardVisible, setKeyboardVisible] = useState(false);
+  const [proposalStatuses, setProposalStatuses] = useState<Record<string, string>>({});
+  const flatListRef = useRef<FlatList<RoomMessage>>(null),
+    inputRef = useRef<React.ElementRef<typeof TextInput>>(null),
+    atBottom = useRef(true),
+    live = useRef(true),
+    flushing = useRef(false);
+  const current = useRef({ diagramId, messages, currentUser, roomId });
+  current.current = { diagramId, messages, currentUser, roomId };
+  const cacheKey = `archai_chat_${currentUser?.id || 'pending'}_${roomId}`;
+  const upsert = useCallback(
+    (incoming: RoomMessage[]) =>
+      setMessages((old) =>
+        mergeRoomMessages(
+          old,
+          incoming.filter((m) => m.roomId === current.current.roomId)
+        )
+      ),
+    []
+  );
+  const refresh = useCallback(async () => {
+    const id = current.current.diagramId;
+    if (!id) return;
+    try {
+      const state = await conversationApi.state(roomId, id);
+      if (!live.current) return;
+      upsert(state.messages);
+      const statuses: Record<string, string> = {};
+      state.review?.proposals?.forEach((p: any) => (statuses[p.id] = p.moderationStatus));
+      setProposalStatuses(statuses);
+      setError('');
+    } catch (e) {
+      if (live.current) setError(e instanceof Error ? e.message : 'No se pudo recuperar la conversación.');
+    }
+  }, [roomId, upsert]);
   useEffect(() => {
-    AsyncStorage.getItem('archai_session').then((stored) => {
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (parsed?.user?.name) {
-            setCurrentUser({
-              name: parsed.user.name,
-              role: parsed.user.role || 'Desarrollador Móvil',
-            });
-          }
-        } catch {}
-      }
-    });
-  }, []);
-
-  // Escuchar estado STOMP
+    live.current = true;
+    setMessages([]);
+    setDiagramId(initialId);
+    let active = true;
+    void readCurrentUser()
+      .then(async (user) => {
+        if (!active) return;
+        setCurrentUser(user);
+        if (!user) throw new Error('Inicia sesión para abrir el chat.');
+        const cached = await AsyncStorage.getItem(`archai_chat_${user.id}_${roomId}`);
+        if (cached && active) upsert(JSON.parse(cached));
+        const session = await conversationApi.resolve(roomId, projectId, initialId);
+        if (!active) return;
+        setDiagramId(session.diagramId);
+      })
+      .catch((e) => {
+        if (active) setError(e.message);
+      });
+    return () => {
+      active = false;
+      live.current = false;
+    };
+  }, [roomId, projectId, initialId, upsert]);
   useEffect(() => {
-    const unsubStatus = mobileStomp.addStatusListener((status) => {
+    if (currentUser)
+      void AsyncStorage.setItem(cacheKey, JSON.stringify(messages.filter((m) => m.roomId === roomId))).catch(
+        () => {}
+      );
+  }, [messages, currentUser, cacheKey]);
+  useEffect(() => {
+    if (!diagramId) return;
+    void refresh();
+    const offStatus = mobileStomp.addStatusListener((status) => {
       setConnectionStatus(status);
+      if (status === 'conectado') void refresh();
     });
-    return unsubStatus;
-  }, []);
-
-  // Suscripción a la sala en tiempo real
-  useEffect(() => {
-    let isSubscribed = true;
-
-    const handleIncomingMessage = (incoming: CollabMessage) => {
-      if (!isSubscribed || !incoming) return;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === incoming.id)) return prev;
-        return [...prev, incoming];
-      });
-    };
-
-    mobileStomp.connect(() => {
-      if (!isSubscribed) return;
-      mobileStomp.subscribeChat(roomId, handleIncomingMessage);
+    const offRoom = mobileStomp.subscribeRoomCollab(roomId, (event) => {
+      if (event.tipo === 'chat_message' && event.payload?.roomId === roomId) upsert([event.payload]);
+      if (event.tipo === 'ia_draft_state') {
+        const statuses: Record<string, string> = {};
+        event.payload?.proposals?.forEach((p: any) => (statuses[p.id] = p.moderationStatus));
+        setProposalStatuses(statuses);
+      }
     });
-
-    if (mobileStomp.isConnected()) {
-      mobileStomp.subscribeChat(roomId, handleIncomingMessage);
-    }
-
+    void mobileStomp.connect();
+    const interval = setInterval(() => void refresh(), 15000);
+    const app = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
     return () => {
-      isSubscribed = false;
-      mobileStomp.unsubscribe(`/topic/room/${roomId}/chat`);
-      mobileStomp.unsubscribe(`/topic/collab/${roomId}`);
+      offStatus();
+      offRoom();
+      clearInterval(interval);
+      app.remove();
     };
-  }, [roomId]);
-
-  // Auto-scroll al final ante nuevos mensajes
+  }, [diagramId, roomId, refresh, upsert]);
   useEffect(() => {
-    if (messages.length > 0) {
-      const timer = setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 80);
-      return () => clearTimeout(timer);
-    }
-  }, [messages.length]);
-
-  // Escucha reactiva del teclado para desplazar el chat suavemente sin solapar mensajes
-  useEffect(() => {
-    const onKeyboardShow = () => {
-      setIsKeyboardVisible(true);
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    };
-
-    const onKeyboardHide = () => {
-      setIsKeyboardVisible(false);
-    };
-
-    const willShowSub = Keyboard.addListener('keyboardWillShow', onKeyboardShow);
-    const didShowSub = Keyboard.addListener('keyboardDidShow', onKeyboardShow);
-    const willHideSub = Keyboard.addListener('keyboardWillHide', onKeyboardHide);
-    const didHideSub = Keyboard.addListener('keyboardDidHide', onKeyboardHide);
-
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true)),
+      hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
     return () => {
-      willShowSub.remove();
-      didShowSub.remove();
-      willHideSub.remove();
-      didHideSub.remove();
+      show.remove();
+      hide.remove();
     };
   }, []);
-
-  const handleSendText = useCallback(
-    (rawText?: string) => {
-      const textToSend = (rawText !== undefined ? rawText : inputMessage).trim();
-      if (!textToSend) return;
-
-      const newMsg: CollabMessage = {
-        id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-        sender: currentUser.name,
-        senderRole: 'DESARROLLADOR_MOVIL',
-        content: textToSend,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        fullDate: new Date().toISOString(),
-        roomId,
-        status: 'enviando',
-      };
-
-      setMessages((prev) => [...prev, newMsg]);
-      setInputMessage('');
-
-      const sent = mobileStomp.sendChatMessage(roomId, {
-        ...newMsg,
-        status: 'entregado',
-      });
-
-      if (sent) {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === newMsg.id ? { ...m, status: 'entregado' } : m))
-        );
-      }
-
-      // Si menciona @ArchAI, respuesta analítica 3FN y Arquitectura en Solo Lectura
-      if (textToSend.includes('@ArchAI')) {
-        setIsAiThinking(true);
-        setTimeout(() => {
-          const aiContent = auditUmlModel(textToSend, activeClasses, activeRelationships);
-          setIsAiThinking(false);
-
-          const aiReply: CollabMessage = {
-            id: 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-            sender: 'ArchAI Assistant',
-            senderRole: 'ARCHAI_IA',
-            content: aiContent,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            fullDate: new Date().toISOString(),
-            isAiResponse: true,
-            roomId,
-            status: 'entregado',
-          };
-
-          mobileStomp.sendChatMessage(roomId, aiReply);
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === aiReply.id)) return prev;
-            return [...prev, aiReply];
-          });
-        }, 800);
-      }
-    },
-    [currentUser.name, inputMessage, roomId, activeClasses, activeRelationships]
-  );
-
-  const handleSelectQuickPrompt = useCallback(
-    (prompt: string) => {
-      handleSendText(prompt);
-    },
-    [handleSendText]
-  );
-
-  const handleLongPressQuickPrompt = useCallback((prompt: string) => {
-    setInputMessage(prompt);
-    inputRef.current?.focus();
-  }, []);
-
-  const handleInsertBotMention = useCallback(() => {
-    if (!inputMessage.includes('@ArchAI')) {
-      setInputMessage((prev) => (prev ? `@ArchAI ${prev}` : '@ArchAI '));
-      inputRef.current?.focus();
+  const send = async (raw: string, id: string = randomUUID()) => {
+    const text = raw.trim(),
+      c = current.current;
+    if (!text || !c.currentUser) return;
+    const optimistic: RoomMessage = {
+      id,
+      roomId,
+      diagramId: c.diagramId || '',
+      sequence: Date.now(),
+      createdAt: new Date().toISOString(),
+      role: 'human',
+      authorId: c.currentUser.id,
+      authorName: c.currentUser.name || c.currentUser.nombre || 'Tú',
+      text,
+      status: 'sending',
+    };
+    upsert([optimistic]);
+    setError('');
+    atBottom.current = true;
+    if (!c.diagramId || !mobileStomp.isConnected()) {
+      upsert([{ ...optimistic, status: 'offline' }]);
+      setError(
+        invokesAI(text)
+          ? 'Consulta conservada. Pulsa Reintentar cuando vuelva la conexión para enviarla a ArchAI.'
+          : 'Mensaje conservado. Se enviará al reconectar.'
+      );
+      return;
     }
-  }, [inputMessage]);
-
+    try {
+      upsert([await conversationApi.send(roomId, c.diagramId, { id, text })]);
+    } catch (e) {
+      upsert([{ ...optimistic, status: e instanceof ApiError && e.status > 0 ? 'failed' : 'offline' }]);
+      if (current.current.roomId === roomId)
+        setError(e instanceof Error ? e.message : 'No se pudo enviar el mensaje.');
+    }
+  };
+  useEffect(() => {
+    if (connectionStatus !== 'conectado' || !diagramId || flushing.current) return;
+    const queued = messages.filter(
+      (m) => m.status === 'offline' && m.authorId === currentUser?.id && !invokesAI(m.text)
+    );
+    if (!queued.length) return;
+    flushing.current = true;
+    void (async () => {
+      for (const m of queued) {
+        if (current.current.roomId !== roomId) break;
+        await send(m.text, m.id);
+      }
+    })().finally(() => {
+      flushing.current = false;
+    });
+  }, [connectionStatus, diagramId, messages.filter((m) => m.status === 'offline').length]);
+  const submit = (text = inputMessage) => {
+    if (!text.trim()) return;
+    setInputMessage('');
+    void send(text);
+  };
+  const retry = (message: RoomMessage) => {
+    if (message.role === 'human') void send(message.text, message.id);
+    else {
+      const request = messages.find((m) => m.id === message.replyTo);
+      if (request) void send(request.text);
+    }
+  };
+  const mapped = (m: RoomMessage): CollabMessage => ({
+    id: m.id,
+    authorId: m.authorId,
+    messageRole: m.role,
+    sender: m.authorName,
+    senderRole: m.role === 'ai' ? 'ARCHAI_IA' : m.role === 'system' ? 'Colaborador' : 'Usuario',
+    content:
+      m.status === 'thinking'
+        ? 'ArchAI está pensando…'
+        : m.status === 'queued'
+          ? 'ArchAI espera su turno…'
+          : m.text,
+    timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    fullDate: m.createdAt,
+    isAiResponse: m.role === 'ai',
+    roomId,
+    status:
+      m.status === 'sent'
+        ? 'entregado'
+        : m.status === 'offline' || m.status === 'failed'
+          ? 'fallido'
+          : 'enviando',
+    avatarColor: m.avatarColor,
+  });
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      {/* 1. Header Superior Ergonómico Modular */}
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ChatHeader
         navigation={navigation}
         roomId={roomId}
         roomName={roomName}
         connectionStatus={connectionStatus}
       />
-
-      {/* 2. Lista de Mensajes con Burbujas Glassmorphism Modulares */}
       <FlatList
         ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        style={styles.flatList}
-        contentContainerStyle={styles.list}
+        data={messages.filter((m) => m.status !== 'skipped')}
+        keyExtractor={(m) => m.id}
+        style={styles.list}
+        contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
+        onScroll={(e) => {
+          const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+          atBottom.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 100;
+        }}
         onContentSizeChange={() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
+          if (atBottom.current) flatListRef.current?.scrollToEnd({ animated: false });
         }}
-        onLayout={() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-        }}
-        ListHeaderComponent={
-          <View style={styles.sessionHeaderBanner}>
-            <View style={styles.sessionPill}>
-              <Users size={11} color={colors.primary} style={{ marginRight: 5 }} />
-              <Text style={styles.sessionPillText}>SALA DE CO-DISEÑO ACTIVA</Text>
-            </View>
-            <Text style={styles.sessionSubtext}>
-              Supervisión en Modo Viaje · Mensajes sincronizados por STOMP
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Bot size={32} color={colors.primary} />
+            <Text style={styles.title}>Tu equipo, también en viaje</Text>
+            <Text style={styles.hint}>
+              Escribe a tus compañeros o menciona a @ArchAI para conversar con la IA.
             </Text>
           </View>
         }
+        ListHeaderComponent={
+          messages.length >= 100 ? (
+            <TouchableOpacity
+              onPress={async () => {
+                if (!diagramId) return;
+                atBottom.current = false;
+                try {
+                  upsert(await conversationApi.messages(roomId, diagramId, messages[0].sequence));
+                } catch (e) {
+                  setError('No se pudo cargar el historial anterior.');
+                }
+              }}
+            >
+              <Text style={styles.link}>Cargar mensajes anteriores</Text>
+            </TouchableOpacity>
+          ) : undefined
+        }
         renderItem={({ item }) => (
-          <ChatMessageItem item={item} currentUser={currentUser} />
+          <View>
+            <ChatMessageItem
+              item={mapped(item)}
+              currentUser={{
+                id: currentUser?.id,
+                name: currentUser?.name || currentUser?.nombre || '',
+                role: currentUser?.role || '',
+              }}
+            />
+            {item.provider && (
+              <Text style={styles.meta}>
+                {item.provider} · {item.model}
+              </Text>
+            )}
+            {item.proposalId && (
+              <View style={styles.proposal}>
+                <Text style={styles.title}>
+                  Propuesta de diseño · {proposalStatuses[item.proposalId] || 'pendiente'}
+                </Text>
+                <Text style={styles.hint}>
+                  La revisión y aprobación se realizan desde la web. Aquí puedes supervisar sus cambios.
+                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    navigation.navigate('CanvasViewer', {
+                      roomId,
+                      roomName,
+                      diagramId,
+                      projectId,
+                      proposalId: item.proposalId,
+                    })
+                  }
+                >
+                  <Text style={styles.link}>Ver en pizarra</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {['offline', 'failed', 'interrupted'].includes(item.status) &&
+              (item.authorId === currentUser?.id || item.requesterId === currentUser?.id) && (
+                <TouchableOpacity onPress={() => retry(item)} style={styles.retry}>
+                  <RefreshCw size={12} color={colors.primary} />
+                  <Text style={styles.link}>Reintentar</Text>
+                </TouchableOpacity>
+              )}
+            {['queued', 'thinking'].includes(item.status) && item.requesterId === currentUser?.id && (
+              <TouchableOpacity
+                onPress={async () => {
+                  if (diagramId) {
+                    try {
+                      await conversationApi.cancel(roomId, diagramId, item.id);
+                      await refresh();
+                    } catch (e) {
+                      setError('No se pudo cancelar la consulta.');
+                    }
+                  }
+                }}
+              >
+                <Text style={styles.link}>Cancelar consulta</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
       />
-
-      {/* Indicador de Análisis en Vivo de @ArchAI */}
-      {isAiThinking && (
-        <View style={styles.aiThinkingRow}>
-          <Sparkles size={13} color={colors.primary} style={{ marginRight: 6 }} />
-          <Text style={styles.aiThinkingText}>
-            ArchAI Co-Developer está evaluando la arquitectura...
-          </Text>
+      {error ? (
+        <View style={styles.error}>
+          <Text style={styles.hint}>{error}</Text>
         </View>
-      )}
-
-      {/* 3. Carrusel Horizontal de Atajos Rápidos a @ArchAI (visible en reposo) */}
+      ) : null}
       {!isKeyboardVisible && (
         <QuickPromptsBar
-          onSelectPrompt={handleSelectQuickPrompt}
-          onLongPressPrompt={handleLongPressQuickPrompt}
+          onSelectPrompt={(text) => {
+            setInputMessage(text);
+            inputRef.current?.focus();
+          }}
+          onLongPressPrompt={setInputMessage}
         />
       )}
-
-      {/* 4. Barra Inferior de Entrada de Texto con Ergonomía Modular */}
       <ChatInputRow
         inputMessage={inputMessage}
         onChangeText={setInputMessage}
-        onSend={() => handleSendText()}
-        onInsertMention={handleInsertBotMention}
+        onSend={() => submit()}
+        onInsertMention={() => {
+          setInputMessage((old) => (invokesAI(old) ? old : `@ArchAI ${old}`));
+          inputRef.current?.focus();
+        }}
         inputRef={inputRef}
         isFocused={isInputFocused}
         isKeyboardVisible={isKeyboardVisible}
-        onFocus={() => {
-          setIsInputFocused(true);
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-        }}
-        onBlur={() => setIsInputFocused(false)}
+        onFocus={() => setInputFocused(true)}
+        onBlur={() => setInputFocused(false)}
       />
     </KeyboardAvoidingView>
   );
 };
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  aiThinkingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(47, 44, 121, 0.40)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(232, 195, 158, 0.25)',
-    paddingVertical: 7,
-    paddingHorizontal: 16,
-  },
-  aiThinkingText: {
-    color: colors.primary,
-    fontSize: 11.5,
-    fontStyle: 'italic',
-    fontWeight: '600',
-  },
-  flatList: {
-    flex: 1,
-  },
-  list: {
-    padding: 16,
-    gap: 12,
-  },
-  sessionHeaderBanner: {
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(23, 26, 74, 0.45)',
-    borderRadius: 12,
+  container: { flex: 1, backgroundColor: colors.background },
+  list: { flex: 1 },
+  content: { padding: 16, gap: 12, flexGrow: 1 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 25 },
+  title: { color: colors.textPrimary, fontWeight: '700', fontSize: 12 },
+  hint: { color: colors.textMuted, fontSize: 11, lineHeight: 18 },
+  link: { color: colors.primary, fontSize: 12, fontWeight: '600', paddingVertical: 8 },
+  meta: { color: colors.textMuted, fontSize: 10, paddingTop: 5 },
+  proposal: {
+    marginTop: 8,
+    padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(232, 195, 158, 0.15)',
+    borderColor: 'rgba(232,195,158,.25)',
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    gap: 4,
   },
-  sessionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(232, 195, 158, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginBottom: 4,
-  },
-  sessionPillText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: colors.primary,
-    letterSpacing: 0.6,
-  },
-  sessionSubtext: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
+  error: { padding: 12, borderTopWidth: 1, borderTopColor: colors.primary },
+  retry: { flexDirection: 'row', gap: 6, alignItems: 'center' },
 });

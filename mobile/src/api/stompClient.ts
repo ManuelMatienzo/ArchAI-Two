@@ -51,6 +51,7 @@ export class MobileStompClient {
       return;
     }
 
+    if(this.client?.active){if(onConnectCallback){const remove=this.addStatusListener(status=>{if(status==='conectado'){remove();onConnectCallback();}});}return;}
     this.notifyStatus('conectando');
     const backendUrl = await getBackendUrl();
     const wsUrl = backendUrl
@@ -275,7 +276,7 @@ export class MobileStompClient {
         return;
       }
       // 2. Mensaje envuelto en MensajeColaboracionDto del backend ({ tipo: 'chat', payload: CollabMessage })
-      if (data && data.tipo === 'chat' && data.payload) {
+      if (data && ['chat','chat_message'].includes(data.tipo) && data.payload && (!data.payload.status||data.payload.status==='sent')) {
         callback(data.payload);
         return;
       }

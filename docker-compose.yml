@@ -14,15 +14,22 @@ services:
       - "8000:8000"
     environment:
       PORT: 8000
-      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require}
-      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-postgres.ajkyjbdtfekejrhjlhca}
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-coldice3301.}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:?Configura la base relacional de prueba en el .env privado}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:?Configura el usuario en el .env privado}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:?Configura la contraseña en el .env privado}
       SPRING_DATASOURCE_DRIVER: org.postgresql.Driver
       SPRING_JPA_DDL_AUTO: update
       SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
       CORS_ALLOWED_ORIGINS: "*"
-      ARCHAI_JWT_SECRETO: ${ARCHAI_JWT_SECRETO:-archai_studio_firma_jwt_ciclo1_2026_clave_segura}
+      ARCHAI_JWT_SECRETO: ${ARCHAI_JWT_SECRETO:?Configura una clave JWT privada}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      ARCHAI_CLAUDE_FALLBACK_ENABLED: ${ARCHAI_CLAUDE_FALLBACK_ENABLED:-true}
+      SPRING_DATA_MONGODB_URI: ${SPRING_DATA_MONGODB_URI:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
 
   # ==============================================================================
   # FRONTEND REACT + VITE + NGINX

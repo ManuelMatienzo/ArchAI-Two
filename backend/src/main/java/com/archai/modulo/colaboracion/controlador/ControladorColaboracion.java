@@ -17,19 +17,63 @@ public class ControladorColaboracion {
     private final com.archai.modulo.ia.servicio.GatewayPropuestasNube nube;
     private final com.archai.modulo.colaboracion.servicio.ServicioRevisionPropuesta revisiones;
     private final ServicioSalaColaborativa servicioSalaColaborativa;
+    private final com.archai.modulo.colaboracion.servicio.ServicioConversacion chat;
+    private final com.archai.modulo.autenticacion.repositorio.UsuarioRepository users;
     private final com.archai.modulo.colaboracion.servicio.CoordinadorPropuestas propuestas;
 
     @MessageMapping("/collab/{salaId}")
-    public void retransmitirAccionColaborativa(@DestinationVariable String salaId, @Payload MensajeColaboracionDto mensaje, java.security.Principal principal) {
+    public void retransmitirAccionColaborativa(
+        @DestinationVariable String salaId,
+        @Payload MensajeColaboracionDto mensaje,
+        java.security.Principal principal
+    ) {
+        if (principal == null) throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.UNAUTHORIZED,
+            "Inicia sesión para continuar."
+        );
+        String userId = principal.getName();
+        var profile = users.findById(userId).orElseThrow();
+        String instance = mensaje.getEmisorId() == null ? "" : mensaje.getEmisorId();
+        mensaje.setEmisorId(instance.startsWith(userId + "#") ? instance : userId);
+        mensaje.setEmisorNombre(profile.getNombre());
+        String diagram = servicioSalaColaborativa.diagramaId(salaId);
+        if (
+            diagram != null &&
+            !java.util.Set.of("cursor", "join", "leave", "salir", "solicitar_diagrama", "chat", "ia_request").contains(
+                String.valueOf(mensaje.getTipo())
+            ) &&
+            !revisiones.puedeEditar(diagram, userId)
+        ) throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.FORBIDDEN,
+            "No tienes permiso para editar este diagrama."
+        );
+        if ("chat".equals(mensaje.getTipo())) {
+            if (diagram == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST,
+                "Abre primero un diagrama del proyecto."
+            );
+            var node = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(mensaje.getPayload());
+            var request = new com.fasterxml.jackson.databind.ObjectMapper()
+                .createObjectNode()
+                .put("id", node.path("id").asText(java.util.UUID.randomUUID().toString()))
+                .put("text", node.path("content").asText(node.path("text").asText()));
+            chat.enviarUsuario(salaId, diagram, userId, request);
+            return;
+        }
+        if (
+            mensaje.getTipo() != null &&
+            (mensaje.getTipo().startsWith("chat_") ||
+                (mensaje.getTipo().startsWith("ia_") && !mensaje.getTipo().equals("ia_request")))
+        ) return;
         mensaje.setTimestamp(System.currentTimeMillis());
         mensaje.setSalaId(salaId);
         if ("ia_draft_state".equals(mensaje.getTipo()) || "ia_review_conflict".equals(mensaje.getTipo())) return; // server-only events
         if (mensaje.getTipo() != null && mensaje.getTipo().startsWith("ia_")) {
-            if (!(mensaje.getPayload() instanceof java.util.Map<?,?>)) return;
+            if (!(mensaje.getPayload() instanceof java.util.Map<?, ?>)) return;
             String user = String.valueOf(mensaje.getEmisorId()).split("#")[0];
             boolean host = servicioSalaColaborativa.esAnfitrion(salaId, user);
             @SuppressWarnings("unchecked")
-            var datos = (java.util.Map<String,Object>) mensaje.getPayload();
+            var datos = (java.util.Map<String, Object>) mensaje.getPayload();
             var result = propuestas.procesar(salaId, mensaje.getTipo(), mensaje.getEmisorId(), datos, host);
             if (result == null) {
                 if ("ia_auto".equals(mensaje.getTipo())) {
@@ -38,11 +82,22 @@ public class ControladorColaboracion {
                 }
                 return;
             }
-            if (("ia_request".equals(mensaje.getTipo()) || "ia_auto".equals(mensaje.getTipo())) && datos.containsKey("diagramId") && !"local".equals(datos.get("inferenceMode"))) {
-                try { nube.register(salaId,principal==null?null:principal.getName(),new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(datos),"ia_auto".equals(mensaje.getTipo())); }
-                catch(org.springframework.web.server.ResponseStatusException ex) {
+            if (
+                ("ia_request".equals(mensaje.getTipo()) || "ia_auto".equals(mensaje.getTipo())) &&
+                datos.containsKey("diagramId") &&
+                !"local".equals(datos.get("inferenceMode"))
+            ) {
+                try {
+                    nube.register(
+                        salaId,
+                        principal == null ? null : principal.getName(),
+                        new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(datos),
+                        "ia_auto".equals(mensaje.getTipo())
+                    );
+                } catch (org.springframework.web.server.ResponseStatusException ex) {
                     mensaje.setTipo("ia_denied");
-                    messagingTemplate.convertAndSend("/topic/collab/"+salaId,mensaje); return;
+                    messagingTemplate.convertAndSend("/topic/collab/" + salaId, mensaje);
+                    return;
                 }
             }
             mensaje.setPayload(result);
@@ -51,7 +106,13 @@ public class ControladorColaboracion {
 
         // CU-03 · Persistir el diagrama activo en memoria de la sala
         if ("diagrama".equalsIgnoreCase(mensaje.getTipo()) && mensaje.getPayload() != null) {
-            mensaje.setPayload(revisiones.actualizarOficial(salaId, mensaje.getPayload(), principal == null ? null : principal.getName()));
+            mensaje.setPayload(
+                revisiones.actualizarOficial(
+                    salaId,
+                    mensaje.getPayload(),
+                    principal == null ? null : principal.getName()
+                )
+            );
         }
 
         // Si un participante nuevo solicita el diagrama y el backend ya lo tiene, responderle de inmediato
@@ -60,24 +121,37 @@ public class ControladorColaboracion {
                 Object diagramaActual = servicioSalaColaborativa.obtenerDiagramaDeSala(salaId);
                 if (diagramaActual != null) {
                     MensajeColaboracionDto respuesta = MensajeColaboracionDto.builder()
-                            .salaId(salaId)
-                            .tipo("diagrama")
-                            .emisorId("sistema-backend")
-                            .emisorNombre("Servidor ArchAI")
-                            .payload(diagramaActual)
-                            .timestamp(System.currentTimeMillis())
-                            .build();
+                        .salaId(salaId)
+                        .tipo("diagrama")
+                        .emisorId("sistema-backend")
+                        .emisorNombre("Servidor ArchAI")
+                        .payload(diagramaActual)
+                        .timestamp(System.currentTimeMillis())
+                        .build();
                     messagingTemplate.convertAndSend("/topic/collab/" + salaId, respuesta);
                 }
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
         }
 
+        if ("join".equalsIgnoreCase(mensaje.getTipo())) {
+            var real = com.archai.modulo.autenticacion.dto.PerfilUsuarioDto.builder()
+                .id(userId)
+                .name(profile.getNombre())
+                .email(profile.getCorreo())
+                .role(profile.getRol())
+                .avatarColor(profile.getColorAvatar())
+                .build();
+            var session = servicioSalaColaborativa.unirseSala(salaId, real);
+            mensaje.setPayload(java.util.Map.of("usuario", real, "participantes", session.getParticipants()));
+            messagingTemplate.convertAndSend("/topic/room/" + salaId + "/presence", session.getParticipants());
+        }
         // CU-03 · Manejo de salida / abandono de sala
         if ("leave".equalsIgnoreCase(mensaje.getTipo()) || "salir".equalsIgnoreCase(mensaje.getTipo())) {
+            if (servicioSalaColaborativa.estaConectado(salaId, userId)) return; // The transport listener owns tab-aware departures.
             try {
-                servicioSalaColaborativa.salirDeSala(salaId, mensaje.getEmisorId());
-                java.util.List<com.archai.modulo.autenticacion.dto.PerfilUsuarioDto> participantes = servicioSalaColaborativa.listarParticipantes(salaId);
+                servicioSalaColaborativa.salirDeSala(salaId, userId);
+                java.util.List<com.archai.modulo.autenticacion.dto.PerfilUsuarioDto> participantes =
+                    servicioSalaColaborativa.listarParticipantes(salaId);
                 messagingTemplate.convertAndSend("/topic/room/" + salaId + "/presence", participantes);
             } catch (Exception ignored) {}
         }

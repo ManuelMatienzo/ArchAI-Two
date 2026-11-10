@@ -1,48 +1,25 @@
-/**
- * ─────────────────────────────────────────────────────────────
- * GEMINI (GOOGLE AI) — Motor de IA en la nube por tokens
- * ─────────────────────────────────────────────────────────────
- * Proveedor PRINCIPAL del agente cuando hay clave configurada
- * (VITE_GEMINI_API_KEY en frontend/.env). No consume RAM local y
- * garantiza salida JSON estructurada (responseMimeType json).
- * Ollama local queda como fallback offline automático (ver
- * ollamaService.ts y agenteDiagrama.ts).
- */
-
-export function obtenerGeminiApiKey(): string {
-  return (
-    (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ||
-    (typeof window !== 'undefined' ? (window as any)?.__ARCHAI_GEMINI_KEY || localStorage.getItem('archai_gemini_api_key') : '') ||
-    ''
-  ).trim();
+import { apiFetch } from './api';
+import { activeRoomContext } from './activeRoom';
+export let MODELO_GEMINI = 'IA de la sala';
+let provider = '';
+export const ultimoProveedorIa = () => provider;
+export const contextoMotor = activeRoomContext;
+/** Compatibility name: availability now means authenticated access to the server gateway. */
+export function geminiDisponible() {
+  return typeof localStorage !== 'undefined' && !!localStorage.getItem('archai_token');
 }
-
-const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-
-/** Modelo por defecto; se puede cambiar con VITE_GEMINI_MODEL. */
-export const MODELO_GEMINI = (import.meta.env.VITE_GEMINI_MODEL as string | undefined)?.trim() || 'gemini-flash-latest';
-
-/** ¿Hay clave de Gemini configurada en el entorno? */
-export function geminiDisponible(): boolean {
-  return obtenerGeminiApiKey().length > 0;
-}
-
-/** Verifica que la clave sea válida (GET /models). No consume tokens. */
-export async function verificarEstadoGemini(timeoutMs = 2500): Promise<{ online: boolean; model: string | null }> {
-  const apiKey = obtenerGeminiApiKey();
-  if (!apiKey) return { online: false, model: null };
+export async function verificarEstadoGemini(
+  _timeoutMs = 3500
+): Promise<{ online: boolean; model: string | null }> {
   try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(`${BASE_URL}/models?key=${encodeURIComponent(apiKey)}`, { signal: controller.signal });
-    clearTimeout(tid);
-    if (res.ok) return { online: true, model: MODELO_GEMINI };
+    const query = new URLSearchParams(contextoMotor());
+    const result = await apiFetch<{ online: boolean; model: string }>('/api/v1/ia/motor?' + query);
+    MODELO_GEMINI = result.model;
+    return result;
   } catch {
-    /* sin conexión o clave inválida → reportar offline */
+    return { online: false, model: null };
   }
-  return { online: false, model: null };
 }
-
 interface ConfiguracionGeneracion {
   temperature?: number;
   maxOutputTokens?: number;
@@ -50,79 +27,36 @@ interface ConfiguracionGeneracion {
   reportErrors?: boolean;
   signal?: AbortSignal;
 }
-
-class GeminiProviderError extends Error {}
-
-function providerError(status: number): GeminiProviderError {
-  if (status === 429) return new GeminiProviderError('Gemini alcanzó su límite de cuota o de solicitudes. Espera antes de reintentar y revisa la cuota del proyecto de Google AI.');
-  if (status === 401 || status === 403) return new GeminiProviderError('Gemini rechazó el acceso. Revisa la clave y los permisos del proyecto de Google AI.');
-  if (status === 404) return new GeminiProviderError('El modelo de Gemini configurado no está disponible para generar contenido. Revisa la configuración del modelo.');
-  if (status === 400) return new GeminiProviderError('Gemini rechazó el formato de la solicitud o sus parámetros. Revisa la compatibilidad del modelo configurado.');
-  if (status >= 500) return new GeminiProviderError('Gemini no está disponible temporalmente. Intenta más tarde o selecciona Local.');
-  return new GeminiProviderError('Gemini no pudo procesar la consulta. Intenta nuevamente o selecciona Local.');
-}
-
-/**
- * Llamada generativa a Gemini. Devuelve el texto de la primera candidata
- * o null si falla (red, clave, 429, JSON vacío...).
- */
 export async function generarContenidoGemini(
   prompt: string,
   systemPrompt: string,
   config: ConfiguracionGeneracion = {},
   timeoutMs = 120000
 ): Promise<string | null> {
-  const apiKey = obtenerGeminiApiKey();
-  if (!apiKey) {
-    if (config.reportErrors) throw new GeminiProviderError('Configura Gemini antes de usar el modo Nube.');
-    return null;
-  }
-
-  const payload = {
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: config.temperature ?? 0.2,
-      maxOutputTokens: config.maxOutputTokens ?? 1500,
-      ...(config.responseMimeType ? { responseMimeType: config.responseMimeType } : {})
-    }
-  };
-
-  const controller = new AbortController();
-  const tid = setTimeout(() => controller.abort(), timeoutMs);
+  const controller = new AbortController(),
+    timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(
-      `${BASE_URL}/models/${MODELO_GEMINI}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(payload),
-        signal: config.signal ? AbortSignal.any([controller.signal, config.signal]) : controller.signal
-      }
-    );
-    if (!res.ok) throw providerError(res.status);
-
-    const data = await res.json();
-    const parts: any[] = data?.candidates?.[0]?.content?.parts || [];
-    const texto = parts.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('').trim();
-    if (!texto) throw new GeminiProviderError('Gemini devolvió una respuesta sin texto. Intenta una consulta más breve o selecciona Local.');
-    return texto;
-  } catch (error) {
-    if (config.reportErrors) {
-      if (config.signal?.aborted) throw new GeminiProviderError('La consulta se canceló.');
-      if (controller.signal.aborted) throw new GeminiProviderError('Gemini tardó demasiado en responder. Intenta una consulta más breve o selecciona Local.');
-      if (error instanceof GeminiProviderError) throw error;
-      throw new GeminiProviderError('No se pudo establecer conexión con Gemini. Revisa tu conexión y vuelve a intentar.');
-    }
+    const result = await apiFetch<{ text: string; provider: string; model: string }>('/api/v1/ia/contenido', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...contextoMotor(),
+        prompt,
+        systemPrompt,
+        json: config.responseMimeType === 'application/json',
+        maxOutputTokens: config.maxOutputTokens || 2048,
+      }),
+      signal: config.signal ? AbortSignal.any([config.signal, controller.signal]) : controller.signal,
+    });
+    provider = result.provider;
+    MODELO_GEMINI = result.model;
+    return result.text;
+  } catch (e) {
+    if (config.reportErrors) throw e;
     return null;
   } finally {
-    clearTimeout(tid);
+    clearTimeout(timer);
   }
 }
-
-/**
- * Chat libre del asistente (saludos / ayuda / preguntas / arquitectura) en español con Gemini.
- */
 export async function generarRespuestaGemini(
   prompt: string,
   contextoDiagrama?: string,

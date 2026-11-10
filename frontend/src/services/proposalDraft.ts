@@ -1,7 +1,8 @@
 import { AtributoUml, ClaseUml, MetodoUml, ModeloDiagrama, RelacionUml, TipoRelacion, Visibilidad } from '../types/uml';
 
 export interface DraftClass extends ClaseUml { targetClassId?: string }
-export interface DraftDiagram { classes: DraftClass[]; relations: RelacionUml[] }
+export interface DraftDeletion {id:string;kind:'class'|'attribute'|'method'|'relation';targetId:string;classId:string;label:string;affectedRelationIds:string[]}
+export interface DraftDiagram { classes: DraftClass[]; relations: RelacionUml[];deletions?:DraftDeletion[] }
 const relationTypes: TipoRelacion[] = ['ASSOCIATION_1_1','ASSOCIATION_1_N','ASSOCIATION_N_M','ASSOCIATION_BINARY','NON_NAVIGABLE','COMPOSITION','AGGREGATION','INHERITANCE','REALIZATION','DEPENDENCY','USAGE','PACKAGE_IMPORT','ASSOCIATION_CLASS'];
 const visibility = (s: unknown): Visibilidad => ['+','-','#','~'].includes(String(s)) ? s as Visibilidad : '+';
 const id = () => `draft-${crypto.randomUUID()}`;

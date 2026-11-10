@@ -62,6 +62,7 @@ const STEREO_ICONS: Record<string, { icon: React.ReactNode }> = {
 };
 
 export interface UmlNodeCardProps {
+  proposedDeletion?: boolean;
   draft?: boolean;
   cls: ClaseUml;
   diagram: ModeloDiagrama;
@@ -146,6 +147,7 @@ export interface UmlNodeCardProps {
  * - El JSX es el mismo que estaba en el lienzo (movido sin cambios de lógica).
  */
 export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNodeCard({
+  proposedDeletion=false,
   draft = false,
   cls,
   diagram,
@@ -239,7 +241,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
           }
         }
       }}
-      className={`uml-class-node ${draft ? 'proposal-ghost-node' : ''} ${isSelected ? 'node-selected' : ''} ${isDragging ? 'dragging' : ''} ${isRemoteDragging ? 'remote-dragging' : ''}`}
+      className={`uml-class-node ${proposedDeletion?'proposal-delete-node':''} ${draft ? 'proposal-ghost-node' : ''} ${isSelected ? 'node-selected' : ''} ${isDragging ? 'dragging' : ''} ${isRemoteDragging ? 'remote-dragging' : ''}`}
       onMouseDown={e => onMouseDown(e, cls)}
       style={{
         left: `${pos.x}px`,
@@ -265,6 +267,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
       }}
     >
       {draft && <span className="proposal-ghost-label">Propuesta IA</span>}
+      {proposedDeletion&&<span className="proposal-ghost-label proposal-delete-label">Eliminación pendiente de confirmar</span>}
       {/* Badge flotante: Origen de conexión */}
       {isConnectingSource && (
         <div

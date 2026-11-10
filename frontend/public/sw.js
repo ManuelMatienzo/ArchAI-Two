@@ -7,7 +7,7 @@
  * - En entorno localhost/desarrollo: Red primero siempre.
  * - Assets estáticos en producción: Caché primero con fallback a red.
  */
-const VERSION = 'archai-v4';
+const VERSION = 'archai-v5-account-sessions';
 const CACHE_PALABRA = `${VERSION}-static`;
 const CACHE_API = `${VERSION}-api`;
 
@@ -44,21 +44,8 @@ self.addEventListener('fetch', (event) => {
   // Solo manejar peticiones GET del mismo origen
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
 
-  // 1. API: red primero, fallback a caché (GET) para reanudar sesión offline
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(request)
-        .then((resp) => {
-          if (resp.ok) {
-            const copia = resp.clone();
-            caches.open(CACHE_API).then((c) => c.put(request, copia)).catch(() => {});
-          }
-          return resp;
-        })
-        .catch(() => caches.match(request))
-    );
-    return;
-  }
+  // Authenticated API data belongs to a specific account. Session recovery uses scoped IndexedDB.
+  if (url.pathname.startsWith('/api/')) return;
 
   // 2. Navegación HTML / Raíz: RED PRIMERO (Network First)
   // Esto resuelve que al presionar F5 se reciba siempre la versión real más reciente

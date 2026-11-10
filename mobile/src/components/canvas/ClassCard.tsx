@@ -13,6 +13,7 @@ import { colors } from '../../theme/colors';
 export interface ClassCardProps {
   model: UmlClass;
   ghost?: boolean;
+  proposedDeletion?:boolean;
   highlighted?: boolean;
   remoteDraggingUser?: string;
   onSelect: (model: UmlClass) => void;
@@ -25,6 +26,7 @@ export interface ClassCardProps {
 export const ClassCard = memo(({
   model,
   ghost,
+  proposedDeletion,
   highlighted,
   remoteDraggingUser,
   onSelect,
@@ -63,6 +65,7 @@ export const ClassCard = memo(({
       style={({ pressed }) => [
         styles.umlClassBox,
         ghost && styles.ghostUmlClass,
+        proposedDeletion && {borderColor:colors.error,borderWidth:2},
         isRemoteDragging && styles.remoteDraggingBox,
         { left: safeX, top: safeY, width: safeW },
         pressed && styles.umlClassBoxPressed,

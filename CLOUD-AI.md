@@ -1,10 +1,10 @@
-# Propuestas colaborativas con Gemini y Claude
+# Motores de IA de la sala
 
-CU-15/16/17 utilizan Spring Boot para las propuestas en nube. El modo Local conserva Ollama. El proveedor de nube principal es Gemini; Claude Sonnet respalda únicamente las consultas y correcciones explícitas del equipo. Las revisiones automáticas nunca llaman a Claude.
+Todas las consultas del chat se ejecutan desde Spring Boot. Web y Android comparten una cola y un contexto por sala. No se incluyen claves de proveedor en los clientes.
 
-## Configuración
+## Configuración privada
 
-Copiar las variables de IA de `backend/.env.example` a **`backend/.env.local`**, excluido de Git:
+Copiar las variables de IA de `backend/.env.example` a `backend/.env.local`:
 
 ```dotenv
 GEMINI_API_KEY=...
@@ -13,39 +13,35 @@ ANTHROPIC_API_KEY=...
 ANTHROPIC_MODEL=claude-sonnet-5-5
 ANTHROPIC_WORKSPACE_ID=
 ARCHAI_CLAUDE_FALLBACK_ENABLED=true
-ARCHAI_AI_TEST_CONTROLS=true
+ARCHAI_AI_TEST_CONTROLS=false
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3.5:4b
 ```
 
-El workspace es opcional y se requiere cuando la clave Anthropic no está asociada a uno. Las variables del proceso y propiedades JVM tienen prioridad sobre el archivo. Reiniciar el backend después de cambiar claves o políticas. `local-test` solo importa las variables de IA de la configuración privada; conserva H2, sin importar la base configurada en el `.env` general.
+El workspace de Anthropic es opcional según el tipo de clave. Las variables del proceso y propiedades JVM tienen prioridad. Reiniciar Spring Boot después de cambiar configuración.
 
-Desde `backend`:
+El anfitrión elige **Nube** o **Local** desde Preferencias del asistente. Nube usa Gemini y puede usar Claude como respaldo si `ARCHAI_CLAUDE_FALLBACK_ENABLED=true`. Local usa el modelo Ollama seleccionado, sin respaldo silencioso a nube. La decisión se comparte entre todos los participantes y se conserva para la sala.
 
-```powershell
-mvn '-Dmaven.repo.local=../.maven-cache' '-Dspring-boot.run.profiles=local-test' spring-boot:run
-```
+## Contrato y costos
 
-Los controles aparecen dentro de Preferencias del asistente → Nube únicamente con frontend en desarrollo, perfil backend `local-test` y `ARCHAI_AI_TEST_CONTROLS=true`. Seleccionar Automático, Solo Gemini o Solo Claude. El interruptor de respaldo afecta la próxima consulta explícita y no puede habilitar un respaldo desautorizado por el servidor. Las consultas en curso conservan su selección.
+`POST /api/v1/colaboracion/salas/{room}/mensajes?diagramId=...` recibe `{id,text}`. El servidor asigna identidad y secuencia, detecta `@ArchAI`, encola una sola inferencia y distribuye sus estados mediante `chat_message` en STOMP. Repetir el mismo identificador y texto devuelve el mensaje existente sin consumir otra inferencia.
 
-Para entrega final usar `ARCHAI_AI_TEST_CONTROLS=false`. El respaldo se gobierna con `ARCHAI_CLAUDE_FALLBACK_ENABLED`; no tiene un interruptor adicional en producción. El servidor rechaza los overrides de prueba fuera de `local-test` aunque se manipule el cliente.
+Las respuestas incluyen texto, proveedor/modelo, duración y tokens. Cuando hay cambios UML se crea una propuesta pendiente: la respuesta no cambia el diseño oficial. Pueden conversar también los lectores del proyecto; la moderación requiere permiso de edición.
 
-Las claves de este flujo no utilizan prefijo `VITE_` ni se envían al navegador. Los servicios anteriores de OCR, generación y asistente clásico conservan su configuración Gemini independiente; no se migraron en este cambio.
+El modelo recibe el diagrama canónico, las intervenciones recientes, un extracto acotado de decisiones anteriores y decisiones de moderación. El historial íntegro se conserva en MongoDB, aunque no se reenvía entero en cada llamada.
 
-## Contrato y límites
+Cuota, red, respuestas inválidas y fallos 5xx pueden activar un respaldo Claude en consultas explícitas. Errores de clave/permisos/parámetros, rechazos de seguridad y cancelaciones no activan otro proveedor. Gemini se pausa cinco minutos tras un 429 y treinta segundos tras dos fallos temporales. Se conservan resultados y errores para evitar reejecución automática.
 
-- El solicitante autentica y registra la consulta por STOMP. Solo ese usuario, con permisos de edición del diagrama asociado a la sala, puede ejecutarla en `POST /api/v1/colaboracion/salas/{salaId}/inferencia/{id}`. El cuerpo es `{}` en producción; en desarrollo admite `provider`, `allowFallback` y `simulateGeminiFailure`.
-- `GET .../inferencia?diagramId=...` devuelve disponibilidad de configuración, modelos y permisos de pruebas, nunca claves. `DELETE .../inferencia/{id}` cancela el trabajo y evita iniciar un respaldo posterior.
-- La respuesta contiene `content`, `provider`, `model`, `durationMs`, `inputTokens`, `outputTokens`. El cliente normaliza el borrador y distribuye el resultado por el evento STOMP existente. Consultar no aprueba ni modifica el diagrama.
-- Gemini dispone de 20 segundos y Claude de 30; máximo 2048 tokens de salida por intento. Los límites HTTP se pueden ajustar con propiedades JVM `archai.ia.gemini-timeout-seconds` y `archai.ia.claude-timeout-seconds`. El cliente admite el recorrido híbrido desde Ollama con margen hasta 125 segundos.
-- Cuota agotada, red, fallos 5xx y respuestas inválidas pueden activar un único respaldo. Cancelaciones, rechazos de seguridad y errores de clave, permisos o parámetros no activan otro proveedor.
-- Tras un 429 se pausa Gemini cinco minutos; tras dos fallos temporales, treinta segundos. Las revisiones automáticas no pasan a Claude durante esas pausas. La simulación de fallo no altera la pausa real.
-- Repetir la misma operación reutiliza su respuesta o error sin otra inferencia. Las operaciones son efímeras durante esta instancia del backend; no hay migraciones ni historial durable nuevo. Se depuran después de quince minutos. El límite por respuesta no equivale a un presupuesto monetario total: revisar consumo y saldo en las consolas de proveedores.
+La observación automática empieza apagada, espera 15 segundos tras cambios estructurales y limita a una revisión/minuto y diez/hora. En nube usa solo Gemini. Desactivarla cancela revisiones automáticas pendientes; salir todos o reiniciar el servidor también la pausa. No se llama a un modelo por pan/zoom o por cada mensaje humano.
 
-## Verificación
+El límite de salida del chat es 2048 tokens por intento. Gemini tiene un plazo HTTP de 20 segundos, Claude de 30 y Ollama de 90. No equivalen a un presupuesto monetario total; no se garantiza una latencia fija.
 
-Desde `backend`: `mvn '-Dmaven.repo.local=../.maven-cache' '-Dspring.profiles.active=local-test' test`.
+Los generadores anteriores de texto/código usan el adaptador autenticado `/api/v1/ia/contenido` y el motor compartido de la sala. El OCR de fotografías conserva su servicio de visión Gemini; en Local solicita cambiar a Nube antes de procesar una imagen y no consume nube silenciosamente.
 
-Desde `frontend`, con Node compatible: ejecutar `node tests/proposalAgent.test.mjs`, `node tests/proposalDraft.test.mjs`, `node tests/proposalRendering.test.mjs` y `npm run build`.
+## Controles de desarrollo
 
-La prueba `node tests/proposalReview.integration.mjs` prepara usuarios y proyecto ficticios sobre el backend local-test. Luego **`node tests/cloudProposal.integration.mjs --live` consume consultas reales**: una por proveedor y una de respaldo con fallo simulado. `--mode=gemini`, `--mode=claude` o `--mode=auto` limita los recorridos. `--natural` evita simular el fallo de Gemini. No ejecutar repetidamente sin revisar el consumo.
+Con frontend en desarrollo, backend `local-test` y `ARCHAI_AI_TEST_CONTROLS=true`, las preferencias muestran Solo Gemini, Solo Claude y el interruptor de respaldo para pruebas. En producción no aparecen y el backend rechaza overrides. La política final se configura en el servidor.
 
-Para probar visualmente, enviar: «Propón Cita con id Long y fecha LocalDateTime; un Paciente existente tiene muchas citas». Verificar proveedor real en el chat; abrir en pizarra, editar, aprobar parcialmente y rechazar lo pendiente desde dos sesiones. Otra sala no debe recibirlo. Local no debe invocar servicios de nube. No se garantiza una latencia fija.
+El perfil `local-test` aísla SQL y MongoDB del `.env` general. Importa únicamente las variables privadas permitidas de IA/Expo/Ollama. Para persistencia de prueba necesita `ARCHAI_TEST_MONGODB_URI` explícito y, si debe sobrevivir al reinicio, una URL H2 de archivo.
+
+Ver [las pruebas automáticas y manuales](README.md). `tests/cloudProposal.integration.mjs --live` consume consultas reales; ejecutar solo sobre el backend aislado 18027 y utilizar `--mode=...` para verificar únicamente el proveedor necesario.
