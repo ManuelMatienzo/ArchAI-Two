@@ -10,7 +10,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.archai.mobile"
+      "bundleIdentifier": "com.archai.mobile",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      }
     },
     "android": {
       "softwareKeyboardLayoutMode": "resize",
@@ -20,16 +25,25 @@
       "package": "com.archai.mobile",
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
       [
         "expo-notifications",
         {
-          "color": "#38bdf8"
+          "color": "#38bdf8",
+          "defaultChannel": "archai-critical",
+          "enableBackgroundRemoteNotifications": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "archaiPush": {
+        "expoProjectId": "",
+        "androidChannelId": "archai-critical"
+      }
+    }
   }
 }

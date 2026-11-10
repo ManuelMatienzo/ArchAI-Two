@@ -14,7 +14,7 @@ interface AppRoutesProps {
   session: InformacionSesion | null;
   onLoginSuccess: (sesion: InformacionSesion, targetView?: 'proyectos' | 'estudio') => void;
   onLogout: () => void;
-  onOpenStudio?: (diagram?: any, projectTitle?: string, diagramId?: string) => void;
+  onOpenStudio?: (diagram?: any, projectTitle?: string, diagramId?: string, roomId?: string) => void;
   onBackToProjects?: () => void;
   selectedDiagram?: any;
   selectedProjectTitle?: string;

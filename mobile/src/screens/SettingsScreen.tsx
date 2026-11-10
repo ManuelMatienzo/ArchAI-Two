@@ -1,19 +1,74 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, Alert, ActivityIndicator } from 'react-native';
 import { Server, Cloud, Save, Wifi, CheckCircle2, AlertCircle } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
 import { getBackendUrl, setBackendUrl, getDefaultBackendUrl, getAutoDetectedHost } from '../api/client';
+import {
+  activarNotificacionesPush,
+  desactivarNotificacionesPush,
+  estaPushHabilitado,
+  type UsuarioPush,
+} from '../services/pushNotificationsService';
 
 export const SettingsScreen = ({ navigation }: any) => {
   const [serverUrl, setServerUrl] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [pushEnabled, setPushEnabled] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [usuario, setUsuario] = useState<UsuarioPush | null>(null);
   const [offlineCacheEnabled, setOfflineCacheEnabled] = useState(true);
 
   useEffect(() => {
     getBackendUrl().then((url) => setServerUrl(url));
+    estaPushHabilitado().then(setPushEnabled).catch(() => {});
+    AsyncStorage.getItem('archai_session')
+      .then((raw) => {
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        const perfil = parsed?.user || parsed;
+        if (perfil?.id) {
+          setUsuario({ id: String(perfil.id), name: perfil.name });
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  // CU-23 — Activa/desactiva notificaciones reales (permiso + token + registro backend).
+  const handleTogglePush = async (value: boolean) => {
+    if (pushBusy) return;
+
+    if (value && !usuario?.id) {
+      Alert.alert('Notificaciones', 'Inicia sesión para activar las notificaciones en este dispositivo.');
+      return;
+    }
+
+    setPushBusy(true);
+    setPushEnabled(value);
+
+    try {
+      if (value && usuario) {
+        const resultado = await activarNotificacionesPush(usuario);
+        if (!resultado.ok) {
+          setPushEnabled(false);
+          Alert.alert(
+            'Notificaciones',
+            resultado.motivo === 'permiso-denegado'
+              ? 'Activa el permiso de notificaciones de ArchAI en los ajustes del sistema.'
+              : 'No se pudieron activar las notificaciones en este dispositivo. Intenta de nuevo más tarde.'
+          );
+        }
+      } else {
+        await desactivarNotificacionesPush();
+      }
+    } catch {
+      setPushEnabled(!value);
+      Alert.alert('Notificaciones', 'No se pudieron actualizar las notificaciones. Intenta de nuevo más tarde.');
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const handleTestConnection = async () => {
     if (!serverUrl.trim()) return;
@@ -139,12 +194,13 @@ export const SettingsScreen = ({ navigation }: any) => {
       <View style={styles.card}>
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.switchTitle}>Notificaciones Push (Web Push VAPID)</Text>
-            <Text style={styles.switchDesc}>Recibir alertas ante propuestas de la IA y eventos de compilación</Text>
+            <Text style={styles.switchTitle}>Notificaciones Push</Text>
+            <Text style={styles.switchDesc}>Recibe alertas de cambios críticos en tus proyectos y salas</Text>
           </View>
           <Switch
             value={pushEnabled}
-            onValueChange={setPushEnabled}
+            onValueChange={handleTogglePush}
+            disabled={pushBusy}
             thumbColor={pushEnabled ? colors.primary : '#4b5563'}
             trackColor={{ false: '#374151', true: 'rgba(56, 189, 248, 0.4)' }}
           />

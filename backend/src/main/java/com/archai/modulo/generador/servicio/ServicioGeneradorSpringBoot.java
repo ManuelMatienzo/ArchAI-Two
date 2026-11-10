@@ -83,6 +83,11 @@ public class ServicioGeneradorSpringBoot {
                 "            <scope>runtime</scope>\n" +
                 "        </dependency>\n" +
                 "        <dependency>\n" +
+                "            <groupId>com.h2database</groupId>\n" +
+                "            <artifactId>h2</artifactId>\n" +
+                "            <scope>runtime</scope>\n" +
+                "        </dependency>\n" +
+                "        <dependency>\n" +
                 "            <groupId>org.projectlombok</groupId>\n" +
                 "            <artifactId>lombok</artifactId>\n" +
                 "            <optional>true</optional>\n" +
@@ -93,6 +98,22 @@ public class ServicioGeneradorSpringBoot {
                 "            <version>${springdoc.version}</version>\n" +
                 "        </dependency>\n" +
                 "    </dependencies>\n" +
+                "    <build>\n" +
+                "        <plugins>\n" +
+                "            <plugin>\n" +
+                "                <groupId>org.springframework.boot</groupId>\n" +
+                "                <artifactId>spring-boot-maven-plugin</artifactId>\n" +
+                "                <configuration>\n" +
+                "                    <excludes>\n" +
+                "                        <exclude>\n" +
+                "                            <groupId>org.projectlombok</groupId>\n" +
+                "                            <artifactId>lombok</artifactId>\n" +
+                "                        </exclude>\n" +
+                "                    </excludes>\n" +
+                "                </configuration>\n" +
+                "            </plugin>\n" +
+                "        </plugins>\n" +
+                "    </build>\n" +
                 "</project>\n";
 
         return GeneratedFileDto.builder()
@@ -106,11 +127,11 @@ public class ServicioGeneradorSpringBoot {
     private GeneratedFileDto generateApplicationProperties(DiagramDto diagram) {
         String content = "server.port=8080\n" +
                 "spring.application.name=" + (diagram.getTitle() != null ? diagram.getTitle().replaceAll("\\s+", "_") : "ArchAI_App") + "\n\n" +
-                "# Conexi\u00f3n a Base de Datos PostgreSQL / Supabase\n" +
-                "spring.datasource.url=${DATABASE_URL:jdbc:postgresql://localhost:5432/archai_db}\n" +
-                "spring.datasource.username=${DATABASE_USER:postgres}\n" +
-                "spring.datasource.password=${DATABASE_PASSWORD:postgres}\n" +
-                "spring.datasource.driver-class-name=org.postgresql.Driver\n\n" +
+                "# Conexión a Base de Datos (PostgreSQL en prod con fallback automático a H2 en memoria para pruebas locales)\n" +
+                "spring.datasource.url=${DATABASE_URL:jdbc:h2:mem:archai_db;DB_CLOSE_DELAY=-1;MODE=PostgreSQL}\n" +
+                "spring.datasource.driver-class-name=${DATABASE_DRIVER:org.h2.Driver}\n" +
+                "spring.datasource.username=${DATABASE_USER:sa}\n" +
+                "spring.datasource.password=${DATABASE_PASSWORD:}\n\n" +
                 "# Hibernate JPA\n" +
                 "spring.jpa.hibernate.ddl-auto=update\n" +
                 "spring.jpa.show-sql=true\n" +
@@ -151,12 +172,14 @@ public class ServicioGeneradorSpringBoot {
         sb.append("package ").append(basePackage).append(".domain.entity;\n\n");
         sb.append("import jakarta.persistence.*;\n");
         sb.append("import lombok.*;\n");
+        sb.append("import com.fasterxml.jackson.annotation.JsonIgnoreProperties;\n");
         sb.append("import java.time.LocalDateTime;\n");
         sb.append("import java.time.LocalDate;\n");
         sb.append("import java.util.List;\n\n");
         sb.append("/**\n * Entidad JPA para la tabla '").append(tableName).append("'.\n */\n");
         sb.append("@Entity\n");
         sb.append("@Table(name = \"").append(tableName).append("\")\n");
+        sb.append("@JsonIgnoreProperties({\"hibernateLazyInitializer\", \"handler\"})\n");
         sb.append("@Getter\n@Setter\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\n");
         sb.append("public class ").append(className).append(" {\n\n");
 
@@ -211,6 +234,7 @@ public class ServicioGeneradorSpringBoot {
                         sb.append("    // Relación UML: Referencia N:1 desde ").append(sourceClass).append("\n");
                         sb.append("    @ManyToOne(fetch = FetchType.LAZY)\n");
                         sb.append("    @JoinColumn(name = \"").append(fkCol).append("\")\n");
+                        sb.append("    @JsonIgnoreProperties(\"").append(uncapitalize(className)).append("List\")\n");
                         sb.append("    private ").append(sourceClass).append(" ").append(sourceVar).append(";\n\n");
                     }
                 }
@@ -364,7 +388,7 @@ public class ServicioGeneradorSpringBoot {
         sb.append("@RestController\n");
         sb.append("@RequestMapping(\"/api/v1/").append(endpoint).append("\")\n");
         sb.append("@RequiredArgsConstructor\n");
-        sb.append("@CrossOrigin(origins = \"*\")\n");
+        sb.append("@CrossOrigin(originPatterns = \"*\")\n");
         sb.append("public class ").append(controllerName).append(" {\n\n");
         sb.append("    private final ").append(serviceName).append(" ").append(serviceVar).append(";\n\n");
         sb.append("    @GetMapping\n");

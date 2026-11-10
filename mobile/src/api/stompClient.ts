@@ -17,6 +17,7 @@ export class MobileStompClient {
   private statusListeners: Set<(status: StompConnectionStatus) => void> = new Set();
   private offlineQueue: QueuedMessage[] = [];
   private currentRoomId: string | null = null;
+  private connectPromise: Promise<void> | null = null;
 
   private notifyStatus(newStatus: StompConnectionStatus) {
     this.status = newStatus;
@@ -51,6 +52,25 @@ export class MobileStompClient {
       return;
     }
 
+    // Si dos pantallas llaman connect() a la vez, comparten la misma conexión
+    // en curso en lugar de crear clientes STOMP duplicados (doble canal / eco doble).
+    if (this.connectPromise) {
+      try {
+        await this.connectPromise;
+      } catch (err) {
+        if (onErrorCallback) onErrorCallback(err);
+        return;
+      }
+      if (this.isConnected() && onConnectCallback) onConnectCallback();
+      return;
+    }
+
+    // Un cliente previo que no llegó a conectar (p. ej. al cambiar de sala) se descarta.
+    if (this.client) {
+      try { await this.client.deactivate(); } catch {}
+      this.client = null;
+    }
+
     this.notifyStatus('conectando');
     const backendUrl = await getBackendUrl();
     const wsUrl = backendUrl
@@ -64,31 +84,68 @@ export class MobileStompClient {
       connectHeaders['Authorization'] = `Bearer ${token}`;
     }
 
-    this.client = new Client({
-      brokerURL: wsUrl,
-      connectHeaders,
-      reconnectDelay: 3000,
-      heartbeatIncoming: 4000,
-      heartbeatOutgoing: 4000,
-      debug: (_str) => {
-        // Modo producción sin ruido de logs
-      },
-      onConnect: () => {
-        this.notifyStatus('conectado');
-        this.resubscribeAll();
-        this.drainOfflineQueue();
-        if (onConnectCallback) onConnectCallback();
-      },
-      onStompError: (frame) => {
+    this.connectPromise = new Promise<void>((resolve, reject) => {
+      let resuelto = false;
+      let temporizador: ReturnType<typeof setTimeout> | null = null;
+
+      const limpiarTemporizador = () => {
+        if (temporizador) {
+          clearTimeout(temporizador);
+          temporizador = null;
+        }
+      };
+
+      this.client = new Client({
+        brokerURL: wsUrl,
+        connectHeaders,
+        reconnectDelay: 3000,
+        heartbeatIncoming: 4000,
+        heartbeatOutgoing: 4000,
+        debug: (_str) => {
+          // Modo producción sin ruido de logs
+        },
+        onConnect: () => {
+          limpiarTemporizador();
+          this.notifyStatus('conectado');
+          this.resubscribeAll();
+          this.drainOfflineQueue();
+          if (onConnectCallback) onConnectCallback();
+          if (!resuelto) {
+            resuelto = true;
+            resolve();
+          }
+        },
+        onStompError: (frame) => {
+          limpiarTemporizador();
+          this.notifyStatus('error');
+          if (onErrorCallback) onErrorCallback(frame);
+          if (!resuelto) {
+            resuelto = true;
+            reject(frame);
+          }
+        },
+        onWebSocketClose: () => {
+          this.notifyStatus('desconectado');
+        },
+      });
+
+      // Corte limpio si el backend no responde: no deja la promesa colgada ni reintentos infinitos.
+      temporizador = setTimeout(() => {
+        if (resuelto || this.isConnected()) return;
+        try { this.client?.deactivate(); } catch {}
         this.notifyStatus('error');
-        if (onErrorCallback) onErrorCallback(frame);
-      },
-      onWebSocketClose: () => {
-        this.notifyStatus('desconectado');
-      },
+        resuelto = true;
+        reject(new Error('Tiempo de espera agotado al conectar el canal colaborativo'));
+      }, 10000);
+
+      this.client.activate();
     });
 
-    this.client.activate();
+    try {
+      await this.connectPromise;
+    } finally {
+      this.connectPromise = null;
+    }
   }
 
   private resubscribeAll() {
@@ -223,13 +280,13 @@ export class MobileStompClient {
     }
   }
 
-  sendSolicitarDiagrama(roomId: string) {
+  sendSolicitarDiagrama(roomId: string, user?: { id: string; name: string }) {
     if (!roomId || roomId === 'LOCAL-MODE') return;
     const body = JSON.stringify({
       salaId: roomId,
       tipo: 'solicitar_diagrama',
-      emisorId: 'usr-mobile-01',
-      emisorNombre: 'Desarrollador Móvil',
+      emisorId: user?.id || 'usr-mobile-01',
+      emisorNombre: user?.name || 'Desarrollador Móvil',
       payload: {},
       timestamp: Date.now(),
     });

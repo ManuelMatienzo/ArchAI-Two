@@ -13,6 +13,11 @@ import { Radio, Folder } from 'lucide-react-native';
 import { colors } from '../theme/colors';
 import { roomsApi, RoomItem, ProjectItem } from '../api/roomsApi';
 import {
+  desactivarNotificacionesPush,
+  sincronizarTokenPush,
+  vincularSalaPush,
+} from '../services/pushNotificationsService';
+import {
   RoomsUserBar,
   RoomsSearchBar,
   RoomCardItem,
@@ -114,6 +119,12 @@ export const RoomsScreen = ({ navigation }: any) => {
     fetchUserProjects();
   }, [isSessionReady, fetchActiveRooms, fetchUserProjects]);
 
+  // CU-23 — Re-registra el token push con el usuario autenticado (si ya estaba activado).
+  useEffect(() => {
+    if (!isSessionReady || !userId) return;
+    sincronizarTokenPush({ id: userId, name: userName }).catch(() => {});
+  }, [isSessionReady, userId, userName]);
+
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
     fetchActiveRooms();
@@ -172,6 +183,7 @@ export const RoomsScreen = ({ navigation }: any) => {
 
   // Selección de proyecto: abre el visor de canvas pasando projectId para cargar su diagrama
   const handleSelectProject = (project: ProjectItem) => {
+    vincularSalaPush({ id: userId, name: userName }, project.codigoAcceso, project.id).catch(() => {});
     navigation.navigate('CanvasViewer', {
       roomId: project.codigoAcceso,
       roomName: project.nombre,
@@ -196,6 +208,7 @@ export const RoomsScreen = ({ navigation }: any) => {
       };
       const session = await roomsApi.joinRoom(finalPin, currentUser);
       fetchActiveRooms();
+      vincularSalaPush({ id: userId, name: userName }, session.roomId || finalPin).catch(() => {});
       navigation.navigate('CanvasViewer', {
         roomId: session.roomId || finalPin,
         roomName: session.roomName || `Sala ${finalPin}`,
@@ -209,6 +222,7 @@ export const RoomsScreen = ({ navigation }: any) => {
   };
 
   const handleSelectRoom = (room: RoomItem) => {
+    vincularSalaPush({ id: userId, name: userName }, room.id).catch(() => {});
     navigation.navigate('CanvasViewer', { roomId: room.id, roomName: room.name });
   };
 
@@ -227,6 +241,7 @@ export const RoomsScreen = ({ navigation }: any) => {
       const created = await roomsApi.createRoom(newRoomName, currentUser, generatedPin);
       setNewRoomModalVisible(false);
       fetchActiveRooms();
+      vincularSalaPush({ id: userId, name: userName }, created.roomId || generatedPin).catch(() => {});
       navigation.navigate('CanvasViewer', {
         roomId: created.roomId || generatedPin,
         roomName: created.roomName || newRoomName,
@@ -246,6 +261,8 @@ export const RoomsScreen = ({ navigation }: any) => {
   };
 
   const handleLogout = async () => {
+    // CU-23 — Evita que el dispositivo siga recibiendo alertas del usuario que sale.
+    await desactivarNotificacionesPush().catch(() => {});
     await AsyncStorage.removeItem('archai_session');
     await AsyncStorage.removeItem('archai_jwt_token');
     navigation.replace('Login');

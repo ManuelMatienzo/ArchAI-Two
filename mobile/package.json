@@ -9,6 +9,9 @@
     "web": "expo start --web",
     "verify:canvas": "node scripts/verify-canvas-data.js",
     "verify:rooms": "node scripts/verify-room-entry.js",
+    "verify:stomp": "node scripts/verify-stomp-realtime.js",
+    "verify:project-room": "node scripts/verify-project-room.js",
+    "verify:push": "node scripts/verify-push-notifications.js",
     "capture:crash": "powershell -ExecutionPolicy Bypass -File scripts/capture-crash.ps1"
   },
   "dependencies": {

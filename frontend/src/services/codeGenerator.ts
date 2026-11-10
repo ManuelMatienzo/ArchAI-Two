@@ -89,6 +89,11 @@ export function generateSpringBootProject(diagram: ModeloDiagrama): GeneratedFil
             <scope>runtime</scope>
         </dependency>
         <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
@@ -310,6 +315,7 @@ ${ifaceMethods}
     let entityContent = `package ${basePackage}.domain.entity;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -323,6 +329,7 @@ import java.util.ArrayList;
  */
 @Entity
 @Table(name = "${tableName}")
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -555,7 +562,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/${endpoint}")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*")
 public class ${className}Controller {
 
     private final ${className}Service service;

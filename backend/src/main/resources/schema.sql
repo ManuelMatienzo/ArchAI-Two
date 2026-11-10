@@ -28,7 +28,26 @@ CREATE TABLE IF NOT EXISTS diagramas (
     fecha_actualizacion TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 3. Índices de Búsqueda y Optimización
+-- 3. Tabla de Suscripciones Push para Alertas Críticas (CU-23)
+--    Token FCM (Android/iOS) o ExponentPushToken (development build).
+CREATE TABLE IF NOT EXISTS suscripciones_push (
+    id VARCHAR(64) PRIMARY KEY,
+    token VARCHAR(512) NOT NULL,
+    usuario_id VARCHAR(64),
+    sala_id VARCHAR(64),
+    proyecto_id VARCHAR(64),
+    plataforma VARCHAR(64),
+    dispositivo VARCHAR(128),
+    activa BOOLEAN DEFAULT TRUE,
+    fecha_registro TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    fecha_actualizacion TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. Índices de Búsqueda y Optimización
 CREATE INDEX IF NOT EXISTS idx_usuarios_correo ON usuarios(correo);
 CREATE INDEX IF NOT EXISTS idx_usuarios_nombre_usuario ON usuarios(nombre_usuario);
 CREATE INDEX IF NOT EXISTS idx_diagramas_titulo ON diagramas(titulo);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_suscripciones_push_token ON suscripciones_push(token);
+CREATE INDEX IF NOT EXISTS idx_suscripciones_push_usuario ON suscripciones_push(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_suscripciones_push_sala ON suscripciones_push(sala_id);
+CREATE INDEX IF NOT EXISTS idx_suscripciones_push_proyecto ON suscripciones_push(proyecto_id);

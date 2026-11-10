@@ -32,6 +32,7 @@ import {
   X,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
 import { UmlClass, UmlRelationship, GhostDraftProposal } from '../types/uml';
 import { BottomSheetModal } from '../components/BottomSheetModal';
@@ -48,6 +49,7 @@ import { normalizeDiagramCoordinates, normalizeGhostDraft } from '../utils/diagr
 import { diagramCacheService } from '../services/diagramCacheService';
 import { roomsApi, RoomParticipant, parseBackendDiagram } from '../api/roomsApi';
 import { mobileStomp } from '../api/stompClient';
+import { vincularSalaPush } from '../services/pushNotificationsService';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -96,6 +98,11 @@ const ZoomBadge = ({ progress }: { progress: SharedValue<number> }) => {
 export const CanvasViewerScreen = ({ route, navigation }: any) => {
   const { roomId = 'ARC-1029', roomName = 'Sala de Co-Diseño', projectId } = route.params || {};
   const cacheKey = projectId ? `proj_${projectId}` : roomId;
+
+  // Identidad real de la sesión móvil para presencia y eventos colaborativos.
+  // Se resuelve antes de conectar el STOMP para que el `join` no use un usuario genérico.
+  const currentUserRef = useRef({ id: 'usr-mobile-01', name: 'Desarrollador Móvil' });
+  const [currentUserId, setCurrentUserId] = useState('usr-mobile-01');
 
   // Estado reactivo del lienzo UML: cargado dinámicamente desde el backend
   const [classes, setClasses] = useState<UmlClass[]>([]);
@@ -478,127 +485,186 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
 
   // Conexión WebSocket STOMP y sincronización presencial de sala
   useEffect(() => {
-    mobileStomp.connect(() => {
-      // 1. Anunciar presencia en la sala
-      mobileStomp.sendJoin(roomId, {
-        id: 'usr-mobile-01',
-        name: 'Desarrollador Móvil',
-        role: 'DESARROLLADOR_MOVIL',
-      });
+    let cancelado = false;
 
-      // 2. Solicitar al backend / anfitrión el diagrama activo en memoria
-      mobileStomp.sendSolicitarDiagrama(roomId);
-
-      // 3. Suscribirse a eventos de colaboración (join/leave, nodo_mover y diagrama en tiempo real)
-      mobileStomp.subscribeRoomCollab(roomId, (msg) => {
-        if (!msg) return;
-
-        const tipo = (msg.tipo || '').toLowerCase();
-        let payload = msg.payload;
-        if (typeof payload === 'string') {
-          try {
-            payload = JSON.parse(payload);
-          } catch {}
+    // Resuelve la identidad real antes de conectar: el join y la presencia deben
+    // llevar el usuario de la sesión, no un id fijo que nunca coincide con la web.
+    const iniciarCanalColaborativo = async () => {
+      try {
+        const raw = await AsyncStorage.getItem('archai_session');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const usuario = parsed?.user || parsed;
+          if (usuario?.id) {
+            currentUserRef.current = {
+              id: String(usuario.id),
+              name: usuario.name || currentUserRef.current.name,
+            };
+            setCurrentUserId(String(usuario.id));
+          }
         }
+      } catch {}
 
-        // A. Presencia: Join / Leave
-        if (tipo === 'join' || tipo === 'leave' || tipo === 'salir') {
-          if (payload && Array.isArray(payload.participantes)) {
-            setParticipants(payload.participantes);
-          } else {
+      if (cancelado) return;
+
+      // CU-23 — El token push queda asociado a la sala/proyecto que el ingeniero supervisa.
+      // Si luego entra en tránsito, las alertas críticas de este proyecto llegarán a su teléfono.
+      vincularSalaPush(currentUserRef.current, roomId, projectId).catch(() => {});
+
+      mobileStomp.connect(() => {
+        const usuarioActual = currentUserRef.current;
+
+        // 1. Suscribirse primero al canal: si el anfitrión responde al join con el
+        //    diagrama de bienvenida antes de estar escuchando, ese mensaje se perdería.
+        //    Eventos: join/leave, nodo_mover y diagrama en tiempo real.
+        mobileStomp.subscribeRoomCollab(roomId, (msg) => {
+          if (!msg) return;
+
+          const tipo = (msg.tipo || '').toLowerCase();
+          let payload = msg.payload;
+          if (typeof payload === 'string') {
+            try {
+              payload = JSON.parse(payload);
+            } catch {}
+          }
+
+          // A. Presencia: Join / Leave
+          if (tipo === 'join' || tipo === 'leave' || tipo === 'salir') {
+            if (payload && Array.isArray(payload.participantes)) {
+              setParticipants(payload.participantes);
+              return;
+            }
+
+            const usuarioRemoto = payload?.usuario;
+            if (tipo === 'join' && usuarioRemoto?.id) {
+              setParticipants((prev) => {
+                if (prev.some((p) => p.id === usuarioRemoto.id)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: usuarioRemoto.id,
+                    name: usuarioRemoto.name || 'Colaborador',
+                    role: usuarioRemoto.role || 'COLABORADOR',
+                    isHost: Boolean(usuarioRemoto.isHost),
+                  },
+                ];
+              });
+              return;
+            }
+
+            if (tipo !== 'join') {
+              const idSaliente = payload?.usuarioId || usuarioRemoto?.id;
+              if (idSaliente) {
+                setParticipants((prev) => prev.filter((p) => p.id !== idSaliente));
+                return;
+              }
+            }
+
             roomsApi.getRoomDetails(roomId).then((info) => {
               if (info && Array.isArray(info.participants)) {
                 setParticipants(info.participants);
               }
             }).catch(() => {});
+            return;
           }
-          return;
-        }
 
-        // B. Movimiento fluido de nodos/tablas en vivo (nodo_mover a ~33 FPS)
-        if (tipo === 'nodo_mover' && payload) {
-          const classId = payload.classId || payload.id || payload.nodeId;
-          const rawX = payload.x;
-          const rawY = payload.y;
-          const senderName = msg.emisorNombre || payload.emisorNombre || 'Colaborador';
+          // B. Movimiento fluido de nodos/tablas en vivo (nodo_mover a ~33 FPS)
+          if (tipo === 'nodo_mover' && payload) {
+            const classId = payload.classId || payload.id || payload.nodeId;
+            const rawX = payload.x;
+            const rawY = payload.y;
+            const senderName = msg.emisorNombre || payload.emisorNombre || 'Colaborador';
 
-          if (classId && typeof rawX === 'number' && typeof rawY === 'number') {
-            const x = Math.round(rawX + diagramOffsetRef.current.x);
-            const y = Math.round(rawY + diagramOffsetRef.current.y);
+            if (classId && typeof rawX === 'number' && typeof rawY === 'number') {
+              const x = Math.round(rawX + diagramOffsetRef.current.x);
+              const y = Math.round(rawY + diagramOffsetRef.current.y);
 
-            // Indicador visual de quién está moviendo la tabla en la Web
-            setRemoteDraggingNodes((prev) => ({
-              ...prev,
-              [classId]: { name: senderName, color: payload.color || '#38bdf8' },
-            }));
+              // Indicador visual de quién está moviendo la tabla en la Web
+              setRemoteDraggingNodes((prev) => ({
+                ...prev,
+                [classId]: { name: senderName, color: payload.color || '#38bdf8' },
+              }));
 
-            if (timersRemoteDragRef.current[classId]) {
-              clearTimeout(timersRemoteDragRef.current[classId]);
+              if (timersRemoteDragRef.current[classId]) {
+                clearTimeout(timersRemoteDragRef.current[classId]);
+              }
+              timersRemoteDragRef.current[classId] = setTimeout(() => {
+                setRemoteDraggingNodes((prev) => {
+                  const next = { ...prev };
+                  delete next[classId];
+                  return next;
+                });
+              }, 1200);
+
+              // Actualización instantánea de posición en el lienzo móvil
+              setClasses((prev) =>
+                prev.map((c) => (c.id === classId ? { ...c, x, y } : c))
+              );
             }
-            timersRemoteDragRef.current[classId] = setTimeout(() => {
-              setRemoteDraggingNodes((prev) => {
-                const next = { ...prev };
-                delete next[classId];
-                return next;
-              });
-            }, 1200);
-
-            // Actualización instantánea de posición en el lienzo móvil
-            setClasses((prev) =>
-              prev.map((c) => (c.id === classId ? { ...c, x, y } : c))
-            );
+            return;
           }
-          return;
-        }
 
-        // C. Sincronización de commit o diagrama completo enviado por el anfitrión
-        if (tipo === 'diagrama' && payload) {
-          try {
-            const diagramData = payload.diagram || payload;
-            const parsed = parseBackendDiagram(diagramData);
-            if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
-              const { classes: normClasses, offsetX, offsetY } = normalizeDiagramCoordinates(parsed.classes);
-              diagramOffsetRef.current = { x: offsetX, y: offsetY };
-              setRemoteDraggingNodes({});
-              setClasses(normClasses);
-              setRelationships(parsed.relationships);
-              diagramCacheService.saveCachedDiagram(cacheKey, parsed);
+          // C. Sincronización de commit o diagrama completo enviado por el anfitrión
+          if (tipo === 'diagrama' && payload) {
+            try {
+              const diagramData = payload.diagram || payload;
+              const parsed = parseBackendDiagram(diagramData);
+              if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
+                const { classes: normClasses, offsetX, offsetY } = normalizeDiagramCoordinates(parsed.classes);
+                diagramOffsetRef.current = { x: offsetX, y: offsetY };
+                setRemoteDraggingNodes({});
+                setClasses(normClasses);
+                setRelationships(parsed.relationships);
+                diagramCacheService.saveCachedDiagram(cacheKey, parsed);
+              }
+            } catch (err) {
+              console.warn('[CanvasViewer] Error al sincronizar diagrama entrante:', err);
             }
-          } catch (err) {
-            console.warn('[CanvasViewer] Error al sincronizar diagrama entrante:', err);
+            return;
           }
-          return;
-        }
-      });
+        });
 
-      // 4. Suscripción dedicada al canal de presencia de sala
-      mobileStomp.subscribePresence(roomId, (presenceList) => {
-        if (Array.isArray(presenceList)) {
-          setParticipants(presenceList);
-        }
-      });
+        // 2. Suscripción dedicada al canal de presencia de sala
+        mobileStomp.subscribePresence(roomId, (presenceList) => {
+          if (Array.isArray(presenceList)) {
+            setParticipants(presenceList);
+          }
+        });
 
-      // 5. Suscripción a propuestas de copiloto fantasma (@ArchAI)
-      mobileStomp.subscribeGhostDrafts(roomId, (proposal) => {
-        // Blindaje: la propuesta remota puede llegar sin `classes`/`relationships`
-        // (antes provocaba un crash al hacer spread de `undefined`).
-        setActiveGhostDraft(normalizeGhostDraft(proposal));
-      });
+        // 3. Suscripción a propuestas de copiloto fantasma (@ArchAI)
+        mobileStomp.subscribeGhostDrafts(roomId, (proposal) => {
+          // Blindaje: la propuesta remota puede llegar sin `classes`/`relationships`
+          // (antes provocaba un crash al hacer spread de `undefined`).
+          setActiveGhostDraft(normalizeGhostDraft(proposal));
+        });
 
-      // 6. Suscripción al chat para badge numérico reactivo en el visor
-      mobileStomp.subscribeChat(roomId, (incoming) => {
-        if (incoming) {
-          setUnreadChatCount((prev) => prev + 1);
-        }
+        // 4. Suscripción al chat para badge numérico reactivo en el visor
+        mobileStomp.subscribeChat(roomId, (incoming) => {
+          if (incoming) {
+            setUnreadChatCount((prev) => prev + 1);
+          }
+        });
+
+        // 5. Ya escuchando: anunciar presencia y pedir el diagrama activo.
+        mobileStomp.sendJoin(roomId, {
+          id: usuarioActual.id,
+          name: usuarioActual.name,
+          role: 'DESARROLLADOR_MOVIL',
+        });
+        mobileStomp.sendSolicitarDiagrama(roomId, usuarioActual);
+      }).catch((err) => {
+        // La sala sigue siendo navegable en modo lectura aunque el WebSocket no conecte.
+        console.warn('[CanvasViewer] No se pudo abrir la conexión STOMP:', err);
       });
-    }).catch((err) => {
-      // La sala sigue siendo navegable en modo lectura aunque el WebSocket no conecte.
-      console.warn('[CanvasViewer] No se pudo abrir la conexión STOMP:', err);
-    });
+    };
+
+    iniciarCanalColaborativo().catch(() => {});
 
     return () => {
-      mobileStomp.sendLeave(roomId, { id: 'usr-mobile-01', name: 'Desarrollador Móvil' });
-      roomsApi.leaveRoom(roomId, 'usr-mobile-01').catch(() => {});
+      cancelado = true;
+      const usuarioActual = currentUserRef.current;
+      mobileStomp.sendLeave(roomId, { id: usuarioActual.id, name: usuarioActual.name });
+      roomsApi.leaveRoom(roomId, usuarioActual.id).catch(() => {});
       mobileStomp.disconnect();
     };
   }, [roomId]);
@@ -631,8 +697,9 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
 
   // Navegación de retorno al hub de salas con salida limpia de sesión
   const handleBackToRooms = useCallback(() => {
-    mobileStomp.sendLeave(roomId, { id: 'usr-mobile-01', name: 'Desarrollador Móvil' });
-    roomsApi.leaveRoom(roomId, 'usr-mobile-01').catch(() => {});
+    const usuarioActual = currentUserRef.current;
+    mobileStomp.sendLeave(roomId, { id: usuarioActual.id, name: usuarioActual.name });
+    roomsApi.leaveRoom(roomId, usuarioActual.id).catch(() => {});
     navigation.goBack();
   }, [roomId, navigation]);
 
@@ -789,7 +856,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
         roomId={roomId}
         roomName={roomName}
         participants={participants}
-        currentUserId="usr-mobile-01"
+        currentUserId={currentUserId}
       />
 
       {/* Bottom Sheet Modal para inspección completa de clase */}

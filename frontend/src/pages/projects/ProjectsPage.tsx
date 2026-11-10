@@ -39,7 +39,7 @@ import {
 export interface ProjectsPageProps {
   session?: InformacionSesion;
   onLogout?: () => void;
-  onOpenStudio?: (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string) => void;
+  onOpenStudio?: (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string, roomId?: string) => void;
 }
 
 export type PaginaGestorProyectosProps = ProjectsPageProps;
@@ -103,7 +103,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     navigate('/login');
   };
 
-  const onOpenStudio = (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string) => {
+  // Cada proyecto abre su propia sala colaborativa (roomId = código de acceso del proyecto),
+  // de modo que la web y el móvil compartan el canal /topic/collab/{roomId} en tiempo real.
+  const onOpenStudio = (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string, roomId?: string) => {
     try {
       localStorage.setItem('archai_current_view', 'estudio');
       if (diagramId) localStorage.setItem('archai_selected_diagram_id', diagramId);
@@ -119,15 +121,16 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     }
 
     if (propOnOpenStudio) {
-      propOnOpenStudio(diagram, projectTitle, diagramId);
+      propOnOpenStudio(diagram, projectTitle, diagramId, roomId);
     }
     const search = new URLSearchParams();
     if (diagramId) search.set('diagramId', diagramId);
     if (projectTitle) search.set('title', projectTitle);
+    if (roomId) search.set('roomId', roomId);
     navigate({
       pathname: diagramId ? `/studio/${diagramId}` : '/studio',
       search: search.toString() ? `?${search.toString()}` : ''
-    }, { state: { diagram, projectTitle, diagramId } });
+    }, { state: { diagram, projectTitle, diagramId, roomId } });
   };
   const [proyectos, setProyectos] = useState<Array<Proyecto & { diagramas?: DiagramaResumen[] }>>(() => {
     try {
@@ -364,7 +367,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
 
       setProyectos(prev => [nuevoPrj, ...prev]);
       notificar(`Proyecto '${nuevoPrj.nombre}' importado con éxito.`);
-      onOpenStudio(importedDiagram, nuevoPrj.nombre, diagId);
+      onOpenStudio(importedDiagram, nuevoPrj.nombre, diagId, nuevoPrj.codigoAcceso);
     } catch (err: any) {
       alert(`Error al importar archivo: ${err.message || 'Formato JSON inválido'}`);
     }
@@ -551,7 +554,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     try {
       localStorage.setItem(`archai_diagram_${nuevoDiagId}`, JSON.stringify(nuevoModelo));
     } catch {}
-    onOpenStudio(nuevoModelo, nuevoDiagrama.titulo, nuevoDiagId);
+    const codigoSalaProyecto = proyectos.find(p => p.id === proyectoId)?.codigoAcceso;
+    onOpenStudio(nuevoModelo, nuevoDiagrama.titulo, nuevoDiagId, codigoSalaProyecto);
   };
 
   // Abrir modal de edición de diagrama
@@ -631,7 +635,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
           const diagId = primerDiagMeta?.id || 'diag-core-mvc';
           const diagTitulo = primerDiagMeta?.titulo || 'Sistema de Comercio Electrónico v1.2';
           const diagModelo = primerDiagMeta?.data || obtenerDiagramaPorId(diagId, diagTitulo);
-          onOpenStudio(diagModelo, diagTitulo, diagId);
+          onOpenStudio(diagModelo, diagTitulo, diagId, proyectos[0]?.codigoAcceso);
         }}
         onSelectTab={(tab) => {
           if (tab === 'canvas') {
@@ -639,7 +643,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
             const diagId = primerDiagMeta?.id || 'diag-core-mvc';
             const diagTitulo = primerDiagMeta?.titulo || 'Sistema de Comercio Electrónico v1.2';
             const diagModelo = primerDiagMeta?.data || obtenerDiagramaPorId(diagId, diagTitulo);
-            onOpenStudio(diagModelo, diagTitulo, diagId);
+            onOpenStudio(diagModelo, diagTitulo, diagId, proyectos[0]?.codigoAcceso);
           } else if (tab === 'team') {
             navigate('/team');
           } else if (tab === 'settings') {
@@ -1283,7 +1287,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
                         >
                           {/* Clic en título abre el estudio con su arquitectura de dominio dedicada */}
                           <div
-                            onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id)}
+onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id, proyecto.codigoAcceso)}
                             style={{
                               display: 'flex',
                               alignItems: 'center',
@@ -1358,7 +1362,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
                               <Trash2 size={11} />
                             </button>
                             <button
-                              onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id)}
+onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id, proyecto.codigoAcceso)}
                               style={{
                                 background: 'transparent',
                                 border: 'none',
@@ -1397,7 +1401,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
                     const primerDiag = proyecto.diagramas?.[0];
                     const diagId = primerDiag?.id || `diag-${proyecto.id}`;
                     const diagTitulo = primerDiag?.titulo || proyecto.nombre;
-                    onOpenStudio(primerDiag?.data || obtenerDiagramaPorId(diagId, diagTitulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion }), diagTitulo, diagId);
+onOpenStudio(primerDiag?.data || obtenerDiagramaPorId(diagId, diagTitulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion }), diagTitulo, diagId, proyecto.codigoAcceso);
                   }}
                   style={{
                     flex: 1,

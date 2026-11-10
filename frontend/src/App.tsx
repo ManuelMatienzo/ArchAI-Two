@@ -62,7 +62,7 @@ export default function App() {
     setSelectedDiagramId(undefined);
   };
 
-  const handleOpenStudio = (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string) => {
+  const handleOpenStudio = (diagram?: ModeloDiagrama, projectTitle?: string, diagramId?: string, roomId?: string) => {
     setSelectedDiagram(diagram);
     setSelectedProjectTitle(projectTitle);
     setSelectedDiagramId(diagramId);
@@ -74,6 +74,9 @@ export default function App() {
 
       if (projectTitle) localStorage.setItem('archai_selected_project_title', projectTitle);
       else localStorage.removeItem('archai_selected_project_title');
+
+      if (roomId) localStorage.setItem('archai_selected_room_id', roomId);
+      else localStorage.removeItem('archai_selected_room_id');
 
       if (diagram) localStorage.setItem('archai_selected_diagram', JSON.stringify(diagram));
       else localStorage.removeItem('archai_selected_diagram');

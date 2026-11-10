@@ -2,12 +2,17 @@ package com.archai.modulo.colaboracion.controlador;
 
 import com.archai.modulo.colaboracion.dto.MensajeColaboracionDto;
 import com.archai.modulo.colaboracion.servicio.ServicioSalaColaborativa;
+import com.archai.modulo.push.dto.AlertaPushDto;
+import com.archai.modulo.push.servicio.ServicioNotificacionesPush;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Controller
 @RequiredArgsConstructor
@@ -18,6 +23,7 @@ public class ControladorColaboracion {
     private final com.archai.modulo.colaboracion.servicio.ServicioRevisionPropuesta revisiones;
     private final ServicioSalaColaborativa servicioSalaColaborativa;
     private final com.archai.modulo.colaboracion.servicio.CoordinadorPropuestas propuestas;
+    private final ServicioNotificacionesPush servicioNotificacionesPush;
 
     @MessageMapping("/collab/{salaId}")
     public void retransmitirAccionColaborativa(@DestinationVariable String salaId, @Payload MensajeColaboracionDto mensaje, java.security.Principal principal) {
@@ -49,6 +55,9 @@ public class ControladorColaboracion {
             if ("ia_sync".equals(mensaje.getTipo())) mensaje.setTipo("ia_settings");
         }
 
+        // CU-23 · Un evento crítico en la sala también despierta al ingeniero en tránsito.
+        notificarEventoCritico(salaId, mensaje);
+
         // CU-03 · Persistir el diagrama activo en memoria de la sala
         if ("diagrama".equalsIgnoreCase(mensaje.getTipo()) && mensaje.getPayload() != null) {
             mensaje.setPayload(revisiones.actualizarOficial(salaId, mensaje.getPayload(), principal == null ? null : principal.getName()));
@@ -73,6 +82,24 @@ public class ControladorColaboracion {
             }
         }
 
+        // CU-03 · Entrada de un participante: registrarlo y difundir la presencia actualizada
+        if ("join".equalsIgnoreCase(mensaje.getTipo())) {
+            try {
+                com.archai.modulo.autenticacion.dto.PerfilUsuarioDto usuario =
+                        com.archai.modulo.autenticacion.dto.PerfilUsuarioDto.builder()
+                                .id(mensaje.getEmisorId())
+                                .name(mensaje.getEmisorNombre())
+                                .build();
+                servicioSalaColaborativa.unirseSala(salaId, usuario);
+                java.util.List<com.archai.modulo.autenticacion.dto.PerfilUsuarioDto> participantes =
+                        servicioSalaColaborativa.listarParticipantes(salaId);
+                messagingTemplate.convertAndSend("/topic/room/" + salaId + "/presence", participantes);
+            } catch (Exception ignored) {
+                // La sala puede no existir aún (primer acceso desde un proyecto): se retransmite
+                // el join igualmente para que el anfitrión envíe el diagrama activo.
+            }
+        }
+
         // CU-03 · Manejo de salida / abandono de sala
         if ("leave".equalsIgnoreCase(mensaje.getTipo()) || "salir".equalsIgnoreCase(mensaje.getTipo())) {
             try {
@@ -84,5 +111,69 @@ public class ControladorColaboracion {
 
         // Retransmitir la acción a todos los suscriptores del canal STOMP
         messagingTemplate.convertAndSend("/topic/collab/" + salaId, mensaje);
+    }
+
+    /**
+     * CU-23 — Traduce eventos colaborativos críticos en alertas push.
+     * Se ejecuta en un pool aparte: un fallo de Firebase jamás frena el STOMP.
+     */
+    private void notificarEventoCritico(String salaId, MensajeColaboracionDto mensaje) {
+        try {
+            String tipo = mensaje.getTipo() != null ? mensaje.getTipo().toLowerCase() : "";
+            Map<?, ?> payload = mensaje.getPayload() instanceof Map<?, ?> mapa ? mapa : Map.of();
+
+            boolean esPropuestaIA = tipo.equals("ghost_draft") || tipo.equals("propuesta_ia");
+            boolean esCritico = esPropuestaIA
+                    || tipo.equals("alerta_critica")
+                    || tipo.equals("cambio_critico")
+                    || tipo.equals("evento_critico");
+
+            // Un commit de diagrama solo alerta si el emisor lo marca explícitamente como crítico.
+            if (!esCritico && tipo.equals("diagrama")) {
+                esCritico = Boolean.TRUE.equals(payload.get("critico"))
+                        || Boolean.TRUE.equals(payload.get("esCritico"));
+            }
+
+            if (!esCritico) return;
+
+            String titulo = texto(payload.get("titulo"));
+            String cuerpo = texto(payload.get("mensaje"));
+            if (titulo == null) {
+                titulo = esPropuestaIA ? "Nueva propuesta de IA" : "Cambio crítico en tu sala";
+            }
+            if (cuerpo == null) {
+                cuerpo = esPropuestaIA
+                        ? "La IA generó una propuesta que requiere tu moderación."
+                        : "Se detectó un cambio crítico en la sala " + salaId + ".";
+            }
+
+            Map<String, String> datos = new HashMap<>();
+            datos.put("roomId", salaId);
+            datos.put("tipo", tipo);
+
+            Object proyectoId = payload.get("proyectoId") != null ? payload.get("proyectoId") : payload.get("projectId");
+            Object nombreSala = payload.get("roomName") != null ? payload.get("roomName") : payload.get("nombreSala");
+            if (proyectoId != null) datos.put("projectId", String.valueOf(proyectoId));
+            if (nombreSala != null) datos.put("roomName", String.valueOf(nombreSala));
+
+            AlertaPushDto alerta = AlertaPushDto.builder()
+                    .tipo(tipo)
+                    .salaId(salaId)
+                    .proyectoId(proyectoId != null ? String.valueOf(proyectoId) : null)
+                    .titulo(titulo)
+                    .cuerpo(cuerpo)
+                    .datos(datos)
+                    .build();
+
+            servicioNotificacionesPush.enviarAlertaCriticaAsync(alerta);
+        } catch (Exception ignored) {
+            // La mensajería push es un canal complementario: nunca interrumpe la colaboración.
+        }
+    }
+
+    private String texto(Object valor) {
+        if (valor == null) return null;
+        String texto = String.valueOf(valor).trim();
+        return texto.isEmpty() ? null : texto;
     }
 }
