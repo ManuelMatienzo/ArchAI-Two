@@ -1000,7 +1000,7 @@ export const FloatingAiAssistant: React.FC<FloatingAiAssistantProps> = ({
       setMessages(prev => [...prev, {
         id: `ai-${Date.now()}`,
         sender: 'ai',
-        text: `No pude modificar el diagrama (${err?.message || 'error del agente'}). Verifica que Ollama esté activo e inténtalo de nuevo, ej.: "agrega una clase Pago con monto BigDecimal" o "relaciona Cliente con Factura como composición".`,
+        text: `No pude modificar el diagrama (${err?.message || 'error del agente'}). Inténtalo de nuevo con otra instrucción, por ejemplo: "agrega una clase Pago con monto BigDecimal" o "relaciona Cliente con Factura como composición".`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         tipoAccion: 'ERROR'
       }]);
@@ -1096,7 +1096,7 @@ export const FloatingAiAssistant: React.FC<FloatingAiAssistantProps> = ({
       setMessages(prev => [...prev, {
         id: `ai-${Date.now()}`,
         sender: 'ai',
-        text: `No pude generar el diagrama. Asegúrate de que Ollama esté activo (badge verde) para que el agente IA dibuje la arquitectura, o repítemelo más simple, por ejemplo: "sistema de ventas con cliente, pedido, producto y factura". Detalle: ${err?.message || 'Error desconocido'}`,
+        text: `No pude generar el diagrama. Inténtalo de nuevo describiendo el sistema de forma concisa, por ejemplo: "sistema de ventas con cliente, pedido, producto y factura". Detalle: ${err?.message || 'Error desconocido'}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         tipoAccion: 'ERROR'
       }]);

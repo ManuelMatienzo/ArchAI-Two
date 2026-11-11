@@ -73,14 +73,37 @@ function verificarFuentes() {
   comprobar('App procesa notificación inicial', app.includes('procesarNotificacionInicial'));
   comprobar(
     'App abre CanvasViewer desde la alerta',
-    app.includes("name: 'CanvasViewer'") || app.includes("navigate('CanvasViewer'")
+    app.includes("navigate('CanvasViewer'")
   );
   comprobar('App no abre el lienzo sin sesión', app.includes("getItem('archai_session')"));
+  comprobar('App evita abrir dos veces la misma alerta', app.includes('esAperturaDuplicada'));
+  // El tap en frío debe guardarse antes de deduplicar; si no, el reintento al montar
+  // el NavigationContainer se descarta y la alerta nunca abre el lienzo.
+  const bloqueAlerta = app.slice(app.indexOf('CU-23 — Alerta de cambio crítico'));
+  comprobar(
+    'El tap en frío se guarda antes de deduplicar',
+    bloqueAlerta.indexOf('pending.current = { ruta, datos }') > -1 &&
+      bloqueAlerta.indexOf('pending.current = { ruta, datos }') < bloqueAlerta.indexOf('esAperturaDuplicada(')
+  );
 
   const settings = leer('src/screens/SettingsScreen.tsx');
   comprobar('Ajustes activa notificaciones reales', settings.includes('activarNotificacionesPush'));
   comprobar('Ajustes desactiva notificaciones reales', settings.includes('desactivarNotificacionesPush'));
+  comprobar('Ajustes usa el usuario de la sesión', settings.includes('readCurrentUser'));
   comprobar('Ajustes no muestra diagnósticos', !settings.includes('token') || !settings.includes('archai_push_token'));
+
+  const servicioPush = leer('src/services/pushNotificationsService.ts');
+  comprobar('El canal push no se registra en web', servicioPush.includes("Platform.OS === 'web'"));
+  comprobar('La baja limpia el usuario vinculado', servicioPush.includes('[CLAVES.token, CLAVES.tipo, CLAVES.usuario]'));
+  comprobar('Prioriza el token nativo FCM/APNs', servicioPush.indexOf('getDevicePushTokenAsync') < servicioPush.indexOf('getExpoPushTokenAsync'));
+  comprobar(
+    'Una alerta solo de proyecto no fuerza la navegación',
+    servicioPush.includes('if (!roomId) return null;')
+  );
+  comprobar(
+    'Normaliza el payload de la notificación a texto',
+    servicioPush.includes('normalizado[clave] = String(valor)')
+  );
 
   const rooms = leer('src/screens/RoomsScreen.tsx');
   comprobar('Hub sincroniza token con el usuario', rooms.includes('sincronizarTokenPush'));
@@ -120,6 +143,10 @@ function verificarFuentes() {
 
   const migracion = path.join(RAIZ_APP, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'V3__CU23_suscripciones_push.sql');
   comprobar('Migración V3 de suscripciones push', existe(migracion));
+
+  const manejador = path.join(RAIZ_APP, 'backend', 'src', 'main', 'java', 'com', 'archai', 'comun', 'excepcion', 'ManejadorExcepcionesGlobal.java');
+  const manejadorFuente = existe(manejador) ? fs.readFileSync(manejador, 'utf8') : '';
+  comprobar('Ruta inexistente responde 404 (no 500)', manejadorFuente.includes('NoResourceFoundException'));
 
   const properties = path.join(RAIZ_APP, 'backend', 'src', 'main', 'resources', 'application.properties');
   const props = existe(properties) ? fs.readFileSync(properties, 'utf8') : '';
@@ -196,10 +223,108 @@ async function verificarBackendEnVivo() {
   comprobar('La baja deja 0 suscripciones activas', (estadoFinal.json?.activas || 0) === 0, `activas=${estadoFinal.json?.activas}`);
 }
 
+async function verificarCasosBorde() {
+  seccion('4. Casos de borde y segmentación');
+
+  const sello = Date.now();
+  const token = `edge-fcm-${sello}`;
+  const usuarioA = `edge-user-${sello}`;
+  const sala1 = `SALA-EDGE-1-${sello}`;
+  const sala2 = `SALA-EDGE-2-${sello}`;
+  const proyecto1 = `PRJ-EDGE-1-${sello}`;
+
+  let disponible = false;
+  try {
+    const estado = await peticion('GET', '/push/estado');
+    disponible = estado.status === 200;
+  } catch {
+    disponible = false;
+  }
+  if (!disponible) {
+    console.log('  [INFO] Backend no disponible; se omiten los casos de borde.');
+    return;
+  }
+
+  const sinToken = await peticion('POST', '/push/register', { usuarioId: usuarioA });
+  comprobar('Registro sin token responde 400', sinToken.status === 400, `status=${sinToken.status}`);
+  comprobar('El error de validación menciona el token', String(sinToken.json?.mensaje || '').toLowerCase().includes('token'));
+
+  const tokenLargo = await peticion('POST', '/push/register', { token: 'x'.repeat(513), usuarioId: usuarioA });
+  comprobar('Token de más de 512 caracteres responde 400', tokenLargo.status === 400, `status=${tokenLargo.status}`);
+
+  const alta = await peticion('POST', '/push/register', {
+    token,
+    usuarioId: usuarioA,
+    salaId: sala1,
+    proyectoId: proyecto1,
+    plataforma: 'mobile-react-native',
+    dispositivo: 'verify-push-edge',
+  });
+  comprobar('Registro inicial responde 200', alta.status === 200 && alta.json?.ok === true, `status=${alta.status}`);
+
+  const reAlta = await peticion('POST', '/push/register', {
+    token,
+    usuarioId: usuarioA,
+    salaId: sala2,
+    proyectoId: proyecto1,
+    plataforma: 'mobile-react-native',
+    dispositivo: 'verify-push-edge',
+  });
+  comprobar('El mismo token actualiza la suscripción (upsert)', reAlta.status === 200 && reAlta.json?.id === alta.json?.id, `id1=${alta.json?.id} id2=${reAlta.json?.id}`);
+
+  const estadoAlta = await peticion('GET', `/push/estado?usuarioId=${encodeURIComponent(usuarioA)}`);
+  comprobar('No se duplican suscripciones activas', estadoAlta.json?.activas === 1, `activas=${estadoAlta.json?.activas}`);
+
+  const salaActual = await peticion('POST', '/push/alertas', { titulo: 'Borde', cuerpo: 'Sala actual', tipo: 'CAMBIO_CRITICO', salaId: sala2 });
+  comprobar('La alerta llega a la sala vigente', salaActual.json?.total === 1, `total=${salaActual.json?.total}`);
+
+  const salaVieja = await peticion('POST', '/push/alertas', { titulo: 'Borde', cuerpo: 'Sala vieja', tipo: 'CAMBIO_CRITICO', salaId: sala1 });
+  comprobar('La sala anterior deja de recibir alertas', salaVieja.json?.total === 0, `total=${salaVieja.json?.total}`);
+
+  const porProyecto = await peticion('POST', '/push/alertas', { titulo: 'Borde', cuerpo: 'Proyecto', tipo: 'CAMBIO_CRITICO', proyectoId: proyecto1 });
+  comprobar('La alerta dirigida al proyecto encuentra el dispositivo', porProyecto.json?.total === 1, `total=${porProyecto.json?.total}`);
+
+  const porUsuario = await peticion('POST', '/push/alertas', { titulo: 'Borde', cuerpo: 'Usuario', tipo: 'CAMBIO_CRITICO', usuarioIds: [usuarioA] });
+  comprobar('La alerta dirigida al usuario encuentra el dispositivo', porUsuario.json?.total === 1, `total=${porUsuario.json?.total}`);
+
+  if (porUsuario.json?.fcmConfigurado === false) {
+    comprobar('Sin FCM se cuenta como omitida, no como fallo', porUsuario.json?.omitidos === 1 && porUsuario.json?.fallidos === 0, `omitidos=${porUsuario.json?.omitidos} fallidos=${porUsuario.json?.fallidos}`);
+  } else {
+    const procesados = (porUsuario.json?.enviados || 0) + (porUsuario.json?.fallidos || 0) + (porUsuario.json?.omitidos || 0);
+    comprobar('Con FCM configurado la alerta se procesa por completo', procesados === (porUsuario.json?.total || 0), `procesados=${procesados}`);
+  }
+
+  const fantasma = await peticion('POST', '/push/alertas', { titulo: 'Borde', cuerpo: 'Fantasma', usuarioIds: [`no-existe-${sello}`] });
+  comprobar('Un destinatario inexistente no genera error', fantasma.status === 200 && fantasma.json?.total === 0, `status=${fantasma.status} total=${fantasma.json?.total}`);
+
+  const bajaToken = await peticion('POST', '/push/unregister', { token });
+  comprobar('La baja por token responde 200', bajaToken.status === 200 && bajaToken.json?.ok === true, `status=${bajaToken.status}`);
+  const estadoBaja = await peticion('GET', `/push/estado?usuarioId=${encodeURIComponent(usuarioA)}`);
+  comprobar('Tras la baja no quedan suscripciones activas', estadoBaja.json?.activas === 0, `activas=${estadoBaja.json?.activas}`);
+
+  const bajaVacia = await peticion('POST', '/push/unregister', {});
+  comprobar('La baja sin token ni usuario responde 400', bajaVacia.status === 400, `status=${bajaVacia.status}`);
+
+  const reactivar = await peticion('POST', '/push/register', { token, usuarioId: usuarioA, salaId: sala2, plataforma: 'mobile-react-native' });
+  comprobar('El mismo token se puede reactivar', reactivar.status === 200, `status=${reactivar.status}`);
+  const bajaUsuario = await peticion('POST', '/push/unregister', { usuarioId: usuarioA });
+  comprobar('La baja por usuario responde 200', bajaUsuario.status === 200, `status=${bajaUsuario.status}`);
+  const estadoFinal = await peticion('GET', `/push/estado?usuarioId=${encodeURIComponent(usuarioA)}`);
+  comprobar('La baja por usuario deja 0 activas', estadoFinal.json?.activas === 0, `activas=${estadoFinal.json?.activas}`);
+
+  const rutaPrueba = await peticion('POST', '/push/test', { titulo: 'x' });
+  comprobar(
+    'No existe una ruta de prueba /push/test',
+    rutaPrueba.status === 404 || rutaPrueba.status === 405,
+    `status=${rutaPrueba.status}`
+  );
+}
+
 (async () => {
   console.log('CU-23 — Verificación de Alertas Push (móvil)\n');
   verificarFuentes();
   await verificarBackendEnVivo();
+  await verificarCasosBorde();
 
   console.log(`\nResultado: ${aprobadas} aprobadas, ${fallidas} fallidas.`);
   if (fallos.length > 0) {

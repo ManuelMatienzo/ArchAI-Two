@@ -18,136 +18,45 @@ import {
   UmlRelationship,
 } from '../types/uml';
 import { mobileStomp } from '../api/stompClient';
-import { auditUmlModel } from '../utils/umlAuditor';
+import { mobileApi } from '../api/client';
+import { roomsApi } from '../api/roomsApi';
+import { auditUmlModelWithSnippet } from '../utils/umlAuditor';
+import { diagramCacheService } from '../services/diagramCacheService';
 import { ChatHeader } from '../components/chat/ChatHeader';
 import { ChatMessageItem } from '../components/chat/ChatMessageItem';
 import { QuickPromptsBar } from '../components/chat/QuickPromptsBar';
 import { ChatInputRow } from '../components/chat/ChatInputRow';
 
-const DEFAULT_CLASSES: UmlClass[] = [
+const INITIAL_WELCOME_MESSAGES = (roomId: string, roomName: string): CollabMessage[] => [
   {
-    id: 'c1',
-    name: 'Cliente',
-    stereotype: 'Entity',
-    tableName: 'clientes',
-    x: 60,
-    y: 80,
-    width: 200,
-    height: 180,
-    attributes: [
-      { id: 'a1', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a2', name: 'dniRuc', type: 'String', visibility: '-' },
-      { id: 'a3', name: 'nombre', type: 'String', visibility: '-' },
-      { id: 'a4', name: 'email', type: 'String', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm1', name: 'validarIdentidad', returnType: 'boolean', visibility: '+' },
-    ],
-  },
-  {
-    id: 'c2',
-    name: 'Venta',
-    stereotype: 'Entity',
-    tableName: 'ventas',
-    x: 350,
-    y: 80,
-    width: 200,
-    height: 180,
-    attributes: [
-      { id: 'a5', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a6', name: 'codigoFactura', type: 'String', visibility: '-' },
-      { id: 'a7', name: 'clienteId', type: 'Long', visibility: '-', isForeignKey: true },
-      { id: 'a8', name: 'totalVenta', type: 'BigDecimal', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm2', name: 'calcularTotal', returnType: 'BigDecimal', visibility: '+' },
-    ],
-  },
-  {
-    id: 'c3',
-    name: 'Producto',
-    stereotype: 'Entity',
-    tableName: 'productos',
-    x: 60,
-    y: 340,
-    width: 190,
-    height: 175,
-    attributes: [
-      { id: 'a10', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a11', name: 'sku', type: 'String', visibility: '-', isUnique: true },
-      { id: 'a12', name: 'precio', type: 'BigDecimal', visibility: '-' },
-      { id: 'a13', name: 'stockActual', type: 'Integer', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm4', name: 'descontarStock', returnType: 'void', visibility: '+' },
-    ],
-  },
-  {
-    id: 'c4',
-    name: 'DetalleVenta',
-    stereotype: 'Entity',
-    tableName: 'detalles_venta',
-    x: 350,
-    y: 340,
-    width: 200,
-    height: 175,
-    attributes: [
-      { id: 'a14', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true },
-      { id: 'a15', name: 'ventaId', type: 'Long', visibility: '-', isForeignKey: true },
-      { id: 'a16', name: 'productoId', type: 'Long', visibility: '-', isForeignKey: true },
-      { id: 'a17', name: 'cantidad', type: 'Integer', visibility: '-' },
-      { id: 'a18', name: 'subtotal', type: 'BigDecimal', visibility: '-' },
-    ],
-    methods: [
-      { id: 'm5', name: 'calcularSubtotal', returnType: 'BigDecimal', visibility: '+' },
-    ],
-  },
-];
-
-const DEFAULT_RELATIONSHIPS: UmlRelationship[] = [
-  {
-    id: 'r1',
-    sourceId: 'c1',
-    targetId: 'c2',
-    type: 'association',
-    sourceMultiplicity: '1',
-    targetMultiplicity: '0..*',
-    name: 'genera',
-  },
-  {
-    id: 'r2',
-    sourceId: 'c2',
-    targetId: 'c4',
-    type: 'composition',
-    sourceMultiplicity: '1',
-    targetMultiplicity: '1..*',
-    name: 'contiene',
-  },
-  {
-    id: 'r3',
-    sourceId: 'c3',
-    targetId: 'c4',
-    type: 'association',
-    sourceMultiplicity: '1',
-    targetMultiplicity: '0..*',
-    name: 'incluido en',
+    id: 'sys_' + Date.now(),
+    sender: 'ArchAI Assistant',
+    senderRole: 'ARCHAI_IA',
+    content: `Te has conectado a la sala colaborativa "${roomName}" (${roomId}). Puedes interactuar con tu equipo en tiempo real o mencionar a @ArchAI para auditar la arquitectura, validar 3FN o generar código.`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    fullDate: new Date().toISOString(),
+    isAiResponse: true,
+    roomId,
+    status: 'entregado',
   },
 ];
 
 export const ChatScreen = ({ route, navigation }: any) => {
   const {
     roomId = 'ARC-1029',
-    roomName = 'Sala de Co-Diseño',
+    roomName = 'Sala de Co-Diseno',
     classes: routeClasses = [],
     relationships: routeRelationships = [],
   } = route.params || {};
 
-  const activeClasses: UmlClass[] =
-    routeClasses && routeClasses.length > 0 ? routeClasses : DEFAULT_CLASSES;
-  const activeRelationships: UmlRelationship[] =
-    routeRelationships && routeRelationships.length > 0
+  const [activeClasses, setActiveClasses] = useState<UmlClass[]>(
+    Array.isArray(routeClasses) && routeClasses.length > 0 ? routeClasses : []
+  );
+  const [activeRelationships, setActiveRelationships] = useState<UmlRelationship[]>(
+    Array.isArray(routeRelationships) && routeRelationships.length > 0
       ? routeRelationships
-      : DEFAULT_RELATIONSHIPS;
+      : []
+  );
 
   const flatListRef = useRef<FlatList<CollabMessage>>(null);
   const inputRef = useRef<any>(null);
@@ -157,66 +66,91 @@ export const ChatScreen = ({ route, navigation }: any) => {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<StompConnectionStatus>('desconectado');
-  const [currentUser, setCurrentUser] = useState<{ name: string; role: string }>({
-    name: 'Tú (Móvil)',
-    role: 'Desarrollador Móvil',
+  const [currentUser, setCurrentUser] = useState<{ id?: string; name: string; role: string }>({
+    name: 'Tu (Movil)',
+    role: 'Desarrollador Movil',
   });
 
-  const [messages, setMessages] = useState<CollabMessage[]>([
-    {
-      id: 'm1',
-      sender: 'Carlos (Líder)',
-      senderRole: 'ARQUITECTO',
-      content: 'Acabo de modelar Cliente y Venta con sus respectivas llaves.',
-      timestamp: '10:14',
-      roomId,
-      status: 'entregado',
-    },
-    {
-      id: 'm2',
-      sender: 'Andrea (Revisor)',
-      senderRole: 'REVISOR',
-      content: '¿No deberíamos desacoplar DetalleVenta como clase asociativa?',
-      timestamp: '10:15',
-      roomId,
-      status: 'entregado',
-    },
-    {
-      id: 'm3',
-      sender: 'ArchAI Assistant',
-      senderRole: 'ARCHAI_IA',
-      content: 'Correcto Andrea. Bajo la 3FN, DetalleVenta debe registrar precioUnitario inmutable para conservar el historial fiscal sin dependencias transitivas.',
-      timestamp: '10:16',
-      isAiResponse: true,
-      roomId,
-      status: 'entregado',
-    },
-    {
-      id: 'm4',
-      sender: 'Carlos (Líder)',
-      senderRole: 'ARQUITECTO',
-      content: 'De acuerdo. Comparto la estructura SQL base para validación del equipo:',
-      timestamp: '10:17',
-      roomId,
-      status: 'entregado',
-      codeSnippet: {
-        language: 'sql',
-        title: 'schema_cliente.sql',
-        code: 'CREATE TABLE clientes (\n    id BIGSERIAL PRIMARY KEY,\n    dni_ruc VARCHAR(20) NOT NULL UNIQUE,\n    nombre VARCHAR(120) NOT NULL\n);',
-      },
-    },
-  ]);
+  const [messages, setMessages] = useState<CollabMessage[]>([]);
 
-  // Cargar perfil autenticado
+  // 1. Cargar historial persistido de la sala desde almacenamiento local (purgando mockups residuales)
+  useEffect(() => {
+    const chatStorageKey = 'archai_chat_history_' + roomId;
+    AsyncStorage.getItem(chatStorageKey).then((stored) => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const clean = parsed.filter(
+              (m: any) =>
+                m.id !== 'm1' &&
+                m.id !== 'm2' &&
+                m.id !== 'm3' &&
+                !m.content?.includes('DetalleVenta como clase asociativa') &&
+                !m.content?.includes('respectivas llaves')
+            );
+            if (clean.length > 0) {
+              setMessages(clean);
+              return;
+            }
+          }
+        } catch {}
+      }
+      setMessages(INITIAL_WELCOME_MESSAGES(roomId, roomName));
+    });
+  }, [roomId, roomName]);
+
+  // 2. Guardar mensajes al actualizarse
+  useEffect(() => {
+    if (messages.length > 0) {
+      const chatStorageKey = 'archai_chat_history_' + roomId;
+      AsyncStorage.setItem(chatStorageKey, JSON.stringify(messages.slice(-50))).catch(() => {});
+    }
+  }, [messages, roomId]);
+
+  // 3. Sincronizar clases y relaciones activas desde el cache o backend si no llegaron por params
+  useEffect(() => {
+    if (activeClasses.length === 0) {
+      let isMounted = true;
+      diagramCacheService.getCachedDiagram(roomId).then((cached) => {
+        if (!isMounted) return;
+        if (cached && Array.isArray(cached.classes) && cached.classes.length > 0) {
+          setActiveClasses(cached.classes);
+          if (Array.isArray(cached.relationships)) {
+            setActiveRelationships(cached.relationships);
+          }
+          return;
+        }
+
+        roomsApi.getRoomDiagram(roomId).then((diagram) => {
+          if (!isMounted) return;
+          if (diagram && Array.isArray(diagram.classes) && diagram.classes.length > 0) {
+            setActiveClasses(diagram.classes);
+            if (Array.isArray(diagram.relationships)) {
+              setActiveRelationships(diagram.relationships);
+            }
+          }
+        }).catch(() => {});
+      }).catch(() => {});
+
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [roomId, activeClasses.length]);
+
+  // 4. Cargar perfil autenticado con ID y nombre
   useEffect(() => {
     AsyncStorage.getItem('archai_session').then((stored) => {
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
-          if (parsed?.user?.name) {
+          const u = parsed?.user || parsed;
+          if (u?.nombre || u?.name || u?.id) {
             setCurrentUser({
-              name: parsed.user.name,
-              role: parsed.user.role || 'Desarrollador Móvil',
+              id: u.id ? String(u.id) : undefined,
+              name: u.nombre || u.name || 'Desarrollador Móvil',
+              role: u.rol || u.role || 'Desarrollador Móvil',
             });
           }
         } catch {}
@@ -224,7 +158,7 @@ export const ChatScreen = ({ route, navigation }: any) => {
     });
   }, []);
 
-  // Escuchar estado STOMP
+  // 5. Escuchar estado de conexion STOMP
   useEffect(() => {
     const unsubStatus = mobileStomp.addStatusListener((status) => {
       setConnectionStatus(status);
@@ -232,7 +166,7 @@ export const ChatScreen = ({ route, navigation }: any) => {
     return unsubStatus;
   }, []);
 
-  // Suscripción a la sala en tiempo real
+  // 6. Suscripcion a la sala en tiempo real (Chat + Propuestas IA + Diagrama en vivo)
   useEffect(() => {
     let isSubscribed = true;
 
@@ -240,17 +174,42 @@ export const ChatScreen = ({ route, navigation }: any) => {
       if (!isSubscribed || !incoming) return;
       setMessages((prev) => {
         if (prev.some((m) => m.id === incoming.id)) return prev;
+        // Evitar duplicación de notificaciones de presencia idénticas consecutivas
+        if (incoming.isSystemNotification) {
+          const last = prev[prev.length - 1];
+          if (last && last.isSystemNotification && last.content === incoming.content) {
+            return prev;
+          }
+        }
         return [...prev, incoming];
       });
+    };
+
+    // Callback para actualizaciones de diagrama concurrentes desde web
+    const handleCollabEvents = (event: any) => {
+      if (!isSubscribed || !event) return;
+      if (event.tipo === 'diagrama' && event.payload) {
+        try {
+          const diag = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
+          if (diag && Array.isArray(diag.classes)) {
+            setActiveClasses(diag.classes);
+            if (Array.isArray(diag.relationships)) {
+              setActiveRelationships(diag.relationships);
+            }
+          }
+        } catch {}
+      }
     };
 
     mobileStomp.connect(() => {
       if (!isSubscribed) return;
       mobileStomp.subscribeChat(roomId, handleIncomingMessage);
+      mobileStomp.subscribeRoomCollab(roomId, handleCollabEvents);
     });
 
     if (mobileStomp.isConnected()) {
       mobileStomp.subscribeChat(roomId, handleIncomingMessage);
+      mobileStomp.subscribeRoomCollab(roomId, handleCollabEvents);
     }
 
     return () => {
@@ -260,7 +219,7 @@ export const ChatScreen = ({ route, navigation }: any) => {
     };
   }, [roomId]);
 
-  // Auto-scroll al final ante nuevos mensajes
+  // 7. Auto-scroll al final ante nuevos mensajes
   useEffect(() => {
     if (messages.length > 0) {
       const timer = setTimeout(() => {
@@ -270,7 +229,7 @@ export const ChatScreen = ({ route, navigation }: any) => {
     }
   }, [messages.length]);
 
-  // Escucha reactiva del teclado para desplazar el chat suavemente sin solapar mensajes
+  // 8. Escucha reactiva del teclado
   useEffect(() => {
     const onKeyboardShow = () => {
       setIsKeyboardVisible(true);
@@ -296,6 +255,20 @@ export const ChatScreen = ({ route, navigation }: any) => {
     };
   }, []);
 
+  // Interoperabilidad Chat -> Visor de Diagrama enfocando una entidad
+  const handleFocusClass = useCallback(
+    (classId: string) => {
+      navigation.navigate('CanvasViewer', {
+        roomId,
+        roomName,
+        focusClassId: classId,
+        classes: activeClasses,
+        relationships: activeRelationships,
+      });
+    },
+    [navigation, roomId, roomName, activeClasses, activeRelationships]
+  );
+
   const handleSendText = useCallback(
     (rawText?: string) => {
       const textToSend = (rawText !== undefined ? rawText : inputMessage).trim();
@@ -304,7 +277,8 @@ export const ChatScreen = ({ route, navigation }: any) => {
       const newMsg: CollabMessage = {
         id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
         sender: currentUser.name,
-        senderRole: 'DESARROLLADOR_MOVIL',
+        senderId: currentUser.id,
+        senderRole: (currentUser.role as any) || 'DESARROLLADOR_MOVIL',
         content: textToSend,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         fullDate: new Date().toISOString(),
@@ -326,31 +300,124 @@ export const ChatScreen = ({ route, navigation }: any) => {
         );
       }
 
-      // Si menciona @ArchAI, respuesta analítica 3FN y Arquitectura en Solo Lectura
+      // Si menciona @ArchAI, respuesta analitica real (Backend REST CU-08 + Codegen determinista)
       if (textToSend.includes('@ArchAI')) {
         setIsAiThinking(true);
-        setTimeout(() => {
-          const aiContent = auditUmlModel(textToSend, activeClasses, activeRelationships);
-          setIsAiThinking(false);
+        const cleanPrompt = textToSend.replace(/@ArchAI/gi, '').trim();
 
-          const aiReply: CollabMessage = {
-            id: 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-            sender: 'ArchAI Assistant',
-            senderRole: 'ARCHAI_IA',
-            content: aiContent,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            fullDate: new Date().toISOString(),
-            isAiResponse: true,
-            roomId,
-            status: 'entregado',
-          };
+        // 1. Solicitudes directas de codigo o auditoria 3FN: generacion determinista inmediata
+        const isCodeOr3Fn =
+          cleanPrompt.toLowerCase().includes('jpa') ||
+          cleanPrompt.toLowerCase().includes('sql') ||
+          cleanPrompt.toLowerCase().includes('ddl') ||
+          cleanPrompt.toLowerCase().includes('3fn') ||
+          cleanPrompt.toLowerCase().includes('normal') ||
+          cleanPrompt.toLowerCase().includes('codigo');
 
-          mobileStomp.sendChatMessage(roomId, aiReply);
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === aiReply.id)) return prev;
-            return [...prev, aiReply];
+        if (isCodeOr3Fn) {
+          setTimeout(() => {
+            const aiResult = auditUmlModelWithSnippet(cleanPrompt, activeClasses, activeRelationships);
+            setIsAiThinking(false);
+
+            const mentionedClass = activeClasses.find((c) =>
+              cleanPrompt.toLowerCase().includes(c.name.toLowerCase()) ||
+              aiResult.content.toLowerCase().includes(c.name.toLowerCase())
+            );
+
+            const aiReply: CollabMessage = {
+              id: 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+              sender: 'ArchAI Assistant',
+              senderRole: 'ARCHAI_IA',
+              content: aiResult.content,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              fullDate: new Date().toISOString(),
+              isAiResponse: true,
+              roomId,
+              status: 'entregado',
+              codeSnippet: aiResult.codeSnippet,
+              targetClassId: mentionedClass?.id,
+            };
+
+            mobileStomp.sendChatMessage(roomId, aiReply);
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === aiReply.id)) return prev;
+              return [...prev, aiReply];
+            });
+          }, 500);
+          return;
+        }
+
+        // 2. Consultas analiticas al backend real Spring Boot (/api/v1/ia/contexto)
+        mobileApi
+          .consultarAgenteIa(cleanPrompt, activeClasses, activeRelationships)
+          .then((backendRes) => {
+            setIsAiThinking(false);
+            let contentText = '';
+            if (backendRes && backendRes.respuesta) {
+              contentText = backendRes.respuesta;
+              if (backendRes.alertas && backendRes.alertas.length > 0) {
+                contentText += '\n\n⚠️ Alertas:\n• ' + backendRes.alertas.join('\n• ');
+              }
+              if (backendRes.sugerencias && backendRes.sugerencias.length > 0) {
+                contentText += '\n\n💡 Sugerencias:\n• ' + backendRes.sugerencias.join('\n• ');
+              }
+            } else {
+              contentText = auditUmlModelWithSnippet(cleanPrompt, activeClasses, activeRelationships).content;
+            }
+
+            const mentionedClass = activeClasses.find((c) =>
+              cleanPrompt.toLowerCase().includes(c.name.toLowerCase()) ||
+              contentText.toLowerCase().includes(c.name.toLowerCase())
+            );
+
+            const aiReply: CollabMessage = {
+              id: 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+              sender: 'ArchAI Assistant',
+              senderRole: 'ARCHAI_IA',
+              content: contentText,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              fullDate: new Date().toISOString(),
+              isAiResponse: true,
+              roomId,
+              status: 'entregado',
+              targetClassId: mentionedClass?.id,
+            };
+
+            mobileStomp.sendChatMessage(roomId, aiReply);
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === aiReply.id)) return prev;
+              return [...prev, aiReply];
+            });
+          })
+          .catch(() => {
+            // Fallback autonomo local si el backend REST no responde
+            setIsAiThinking(false);
+            const fallbackResult = auditUmlModelWithSnippet(cleanPrompt, activeClasses, activeRelationships);
+            const mentionedClass = activeClasses.find((c) =>
+              cleanPrompt.toLowerCase().includes(c.name.toLowerCase()) ||
+              fallbackResult.content.toLowerCase().includes(c.name.toLowerCase())
+            );
+
+            const aiReply: CollabMessage = {
+              id: 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+              sender: 'ArchAI Assistant',
+              senderRole: 'ARCHAI_IA',
+              content: fallbackResult.content,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              fullDate: new Date().toISOString(),
+              isAiResponse: true,
+              roomId,
+              status: 'entregado',
+              codeSnippet: fallbackResult.codeSnippet,
+              targetClassId: mentionedClass?.id,
+            };
+
+            mobileStomp.sendChatMessage(roomId, aiReply);
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === aiReply.id)) return prev;
+              return [...prev, aiReply];
+            });
           });
-        }, 800);
       }
     },
     [currentUser.name, inputMessage, roomId, activeClasses, activeRelationships]
@@ -381,7 +448,7 @@ export const ChatScreen = ({ route, navigation }: any) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      {/* 1. Header Superior Ergonómico Modular */}
+      {/* 1. Header Superior Ergonomico */}
       <ChatHeader
         navigation={navigation}
         roomId={roomId}
@@ -389,7 +456,7 @@ export const ChatScreen = ({ route, navigation }: any) => {
         connectionStatus={connectionStatus}
       />
 
-      {/* 2. Lista de Mensajes con Burbujas Glassmorphism Modulares */}
+      {/* 2. Lista de Mensajes con Auto-Scroll y Soporte de Codigo */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -408,29 +475,33 @@ export const ChatScreen = ({ route, navigation }: any) => {
           <View style={styles.sessionHeaderBanner}>
             <View style={styles.sessionPill}>
               <Users size={11} color={colors.primary} style={{ marginRight: 5 }} />
-              <Text style={styles.sessionPillText}>SALA DE CO-DISEÑO ACTIVA</Text>
+              <Text style={styles.sessionPillText}>SALA DE CO-DISENO ACTIVA</Text>
             </View>
             <Text style={styles.sessionSubtext}>
-              Supervisión en Modo Viaje · Mensajes sincronizados por STOMP
+              Supervision en Modo Viaje · STOMP WebSocket Bidireccional
             </Text>
           </View>
         }
         renderItem={({ item }) => (
-          <ChatMessageItem item={item} currentUser={currentUser} />
+          <ChatMessageItem
+            item={item}
+            currentUser={currentUser}
+            onFocusClass={handleFocusClass}
+          />
         )}
       />
 
-      {/* Indicador de Análisis en Vivo de @ArchAI */}
+      {/* Indicador de Analisis en Vivo de @ArchAI */}
       {isAiThinking && (
         <View style={styles.aiThinkingRow}>
           <Sparkles size={13} color={colors.primary} style={{ marginRight: 6 }} />
           <Text style={styles.aiThinkingText}>
-            ArchAI Co-Developer está evaluando la arquitectura...
+            ArchAI Co-Developer esta evaluando la arquitectura...
           </Text>
         </View>
       )}
 
-      {/* 3. Carrusel Horizontal de Atajos Rápidos a @ArchAI (visible en reposo) */}
+      {/* 3. Carrusel Horizontal de Atajos Rapidos a @ArchAI (visible en reposo) */}
       {!isKeyboardVisible && (
         <QuickPromptsBar
           onSelectPrompt={handleSelectQuickPrompt}
@@ -438,7 +509,7 @@ export const ChatScreen = ({ route, navigation }: any) => {
         />
       )}
 
-      {/* 4. Barra Inferior de Entrada de Texto con Ergonomía Modular */}
+      {/* 4. Barra Inferior de Entrada de Texto Ergonomica */}
       <ChatInputRow
         inputMessage={inputMessage}
         onChangeText={setInputMessage}

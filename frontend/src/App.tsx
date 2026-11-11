@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { InformacionSesion } from './types/auth';
 import { ModeloDiagrama } from './types/uml';
@@ -21,6 +21,10 @@ export default function App() {
     return localStorage.getItem('archai_selected_diagram_id') || undefined;
   });
 
+  const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(() => {
+    return localStorage.getItem('archai_selected_room_id') || undefined;
+  });
+
   const [selectedProjectTitle, setSelectedProjectTitle] = useState<string | undefined>(() => {
     return localStorage.getItem('archai_selected_project_title') || undefined;
   });
@@ -41,6 +45,19 @@ export default function App() {
     }
     return undefined;
   });
+
+  useEffect(() => {
+    const expired = () => {
+      setSession(null);
+      setSelectedDiagram(undefined);
+      setSelectedProjectTitle(undefined);
+      setSelectedDiagramId(undefined);
+    setSelectedRoomId(undefined);
+    localStorage.removeItem('archai_selected_room_id');
+    };
+    window.addEventListener('archai-session-expired', expired);
+    return () => window.removeEventListener('archai-session-expired', expired);
+  }, []);
 
   const handleLoginSuccess = (sesion: InformacionSesion, targetView?: 'proyectos' | 'estudio') => {
     setSession(sesion);
@@ -66,6 +83,7 @@ export default function App() {
     setSelectedDiagram(diagram);
     setSelectedProjectTitle(projectTitle);
     setSelectedDiagramId(diagramId);
+    setSelectedRoomId(roomId);
 
     try {
       localStorage.setItem('archai_current_view', 'estudio');
@@ -74,6 +92,9 @@ export default function App() {
 
       if (projectTitle) localStorage.setItem('archai_selected_project_title', projectTitle);
       else localStorage.removeItem('archai_selected_project_title');
+
+      if (roomId) localStorage.setItem('archai_selected_room_id', roomId);
+      else localStorage.removeItem('archai_selected_room_id');
 
       if (roomId) localStorage.setItem('archai_selected_room_id', roomId);
       else localStorage.removeItem('archai_selected_room_id');
@@ -102,6 +123,7 @@ export default function App() {
         selectedDiagram={selectedDiagram}
         selectedProjectTitle={selectedProjectTitle}
         selectedDiagramId={selectedDiagramId}
+        selectedRoomId={selectedRoomId}
       />
     </BrowserRouter>
   );

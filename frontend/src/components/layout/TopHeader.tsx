@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
+  MessageSquare,
   Share2, 
   Download, 
   Code2, 
@@ -45,6 +46,9 @@ interface TopHeaderProps {
   onOpenQuickSearch?: () => void;
   onToggleCodeDock: () => void;
   isCodeDockOpen: boolean;
+  onToggleTeamChat?: () => void;
+  isTeamChatOpen?: boolean;
+  unreadChatCount?: number;
   onShare: () => void;
   onLogout: () => void;
   /** CU-05 · Guardar diagrama en la nube */
@@ -89,6 +93,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenQuickSearch,
   onToggleCodeDock,
   isCodeDockOpen,
+  onToggleTeamChat,
+  isTeamChatOpen = false,
+  unreadChatCount = 0,
   onShare,
   onLogout,
   onGuardarNube,
@@ -523,6 +530,50 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <Code2 size={15} />
           <span className="hide-on-mobile">Código</span>
         </button>
+
+        {/* Botón Chat de Equipo en Vivo */}
+        {onToggleTeamChat && (
+          <button
+            onClick={onToggleTeamChat}
+            className="btn-studio-glass"
+            style={{
+              background: isTeamChatOpen ? 'var(--btn-studio-share-bg)' : undefined,
+              borderColor: isTeamChatOpen ? 'var(--btn-studio-share-border)' : undefined,
+              color: isTeamChatOpen ? 'var(--accent-primary)' : undefined,
+              padding: '6px 12px',
+              fontSize: '0.76rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              position: 'relative'
+            }}
+            title="Abrir chat en tiempo real con el equipo móvil y anfitrión"
+          >
+            <MessageSquare size={15} />
+            <span className="hide-on-mobile">Chat</span>
+            {unreadChatCount > 0 && !isTeamChatOpen && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '-4px',
+                  right: '-4px',
+                  background: '#ef4444',
+                  color: '#ffffff',
+                  fontSize: '0.62rem',
+                  fontWeight: 900,
+                  borderRadius: '10px',
+                  padding: '1px 5px',
+                  minWidth: '16px',
+                  textAlign: 'center',
+                  boxShadow: '0 0 8px rgba(239, 68, 68, 0.7)'
+                }}
+              >
+                {unreadChatCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* ─── Menú Glass Desplegable de Más Opciones [ ⋯ ] ─── */}
         <div ref={moreMenuRef} style={{ position: 'relative' }}>

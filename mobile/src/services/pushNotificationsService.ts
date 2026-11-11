@@ -9,15 +9,16 @@ import { mobileApi } from '../api/client';
  *
  * Flujo:
  *  1. Permiso del sistema + canal Android de máxima prioridad.
- *  2. Obtención del token: Expo Push (si hay projectId de EAS) o token nativo FCM.
+ *  2. Obtención del token: token nativo FCM/APNs; si no está disponible, Expo Push
+ *     (requiere `extra.eas.projectId` o `extra.archaiPush.expoProjectId`).
  *  3. Registro del token contra `POST /api/v1/push/register`.
  *  4. Listeners de notificación recibida / tap para abrir la sala o proyecto.
  *
- * Punto de integración de Firebase (lo único que falta):
- *  - Colocar `google-services.json` en `ArchAI-App/mobile/` y declararlo en `app.json`
- *    (`android.googleServicesFile`). Expo/`expo-notifications` obtiene el token FCM nativo.
- *  - En el backend, definir `ARCHAI_PUSH_FCM_CREDENCIALES` y `ARCHAI_PUSH_FCM_HABILITADO=true`.
- *  - Opcional para development builds con Expo Push: rellenar `extra.eas.projectId` en `app.json`.
+ * Integración de Firebase:
+ *  - El móvil ya incluye `google-services.json` y `android.googleServicesFile` en `app.json`.
+ *    Expo/`expo-notifications` obtiene el token FCM nativo con `getDevicePushTokenAsync`.
+ *  - Lo único que falta es la credencial del servidor en el backend:
+ *    `ARCHAI_PUSH_FCM_CREDENCIALES` + `ARCHAI_PUSH_FCM_HABILITADO=true`.
  */
 
 export const PUSH_CHANNEL_ID = 'archai-critical';
@@ -112,11 +113,36 @@ export function obtenerProjectIdExpo(): string {
 
 /**
  * Obtiene el token del dispositivo.
- * Prioriza Expo Push si hay projectId; si no, usa el token nativo (FCM en Android).
+ * Prioriza el token nativo (FCM en Android / APNs en iOS) y usa Expo Push como respaldo
+ * cuando el proyecto no tiene credenciales nativas pero sí `projectId` de EAS.
  */
 async function obtenerTokenPush(): Promise<{ token: string; tipo: TipoTokenPush }> {
-  const projectId = obtenerProjectIdExpo();
+  if (Platform.OS === 'web') {
+    // El canal push de CU-23 es exclusivo del dispositivo móvil.
+    throw new Error('no-disponible');
+  }
 
+  try {
+    const deviceToken = await Notifications.getDevicePushTokenAsync();
+    const datos = (deviceToken as any)?.data;
+    const token =
+      typeof datos === 'string'
+        ? datos
+        : datos != null
+          ? JSON.stringify(datos)
+          : '';
+
+    if (token) {
+      return {
+        token,
+        tipo: Platform.OS === 'android' ? 'fcm' : Platform.OS === 'ios' ? 'apns' : 'desconocido',
+      };
+    }
+  } catch {
+    // Sin google-services.json / APNs se intenta el token de Expo Push.
+  }
+
+  const projectId = obtenerProjectIdExpo();
   if (projectId) {
     try {
       const expoToken = await Notifications.getExpoPushTokenAsync({ projectId });
@@ -124,27 +150,11 @@ async function obtenerTokenPush(): Promise<{ token: string; tipo: TipoTokenPush 
         return { token: expoToken.data, tipo: 'expo' };
       }
     } catch {
-      // Sin credenciales Expo/EAS se intenta el token nativo.
+      // Sin servicio Expo disponible: no hay token utilizable.
     }
   }
 
-  const deviceToken = await Notifications.getDevicePushTokenAsync();
-  const datos = (deviceToken as any)?.data;
-  const token =
-    typeof datos === 'string'
-      ? datos
-      : datos != null
-        ? JSON.stringify(datos)
-        : '';
-
-  if (!token) {
-    throw new Error('sin-token');
-  }
-
-  return {
-    token,
-    tipo: Platform.OS === 'android' ? 'fcm' : Platform.OS === 'ios' ? 'apns' : 'desconocido',
-  };
+  throw new Error('sin-token');
 }
 
 /** Activa notificaciones: permiso + canal + token + registro en backend. */
@@ -153,6 +163,9 @@ export async function activarNotificacionesPush(
   contexto?: ContextoPush
 ): Promise<ResultadoActivacionPush> {
   if (!usuario?.id) {
+    return { ok: false, motivo: 'no-disponible' };
+  }
+  if (Platform.OS === 'web') {
     return { ok: false, motivo: 'no-disponible' };
   }
 
@@ -213,7 +226,7 @@ export async function desactivarNotificacionesPush(): Promise<void> {
   }
 
   await AsyncStorage.setItem(CLAVES.habilitado, '0');
-  await AsyncStorage.multiRemove([CLAVES.token, CLAVES.tipo]);
+  await AsyncStorage.multiRemove([CLAVES.token, CLAVES.tipo, CLAVES.usuario]);
 }
 
 /** Preferencia local de notificaciones (switch de Ajustes). */
@@ -287,7 +300,13 @@ export function extraerDatosNotificacion(
   return normalizado;
 }
 
-/** Traduce el payload de la alerta a la ruta de la sala/proyecto. */
+/**
+ * Traduce el payload de la alerta a la ruta de la sala/proyecto.
+ *
+ * Devuelve `null` si la alerta no trae `roomId`/`salaId`: una alerta solo de proyecto
+ * no puede abrir el lienzo (el visor necesita una sala concreta), así que se limita a
+ * mostrarse en la bandeja del sistema.
+ */
 export function extraerRutaNotificacion(
   datos: Record<string, string>
 ): RutaNotificacion | null {
@@ -306,14 +325,18 @@ export function extraerRutaNotificacion(
 
 /**
  * Suscribe los listeners de notificación. Devuelve la función de limpieza.
- * El tap en una alerta abre directamente el lienzo de la sala/proyecto.
+ *
+ * `alAbrir` recibe la ruta de la sala/proyecto y el `data` normalizado de la alerta,
+ * para que la app pueda distinguir entre una alerta crítica de CU-23 y una notificación
+ * de actividad del equipo sin registrar dos listeners.
  */
 export function suscribirNotificaciones(
-  alAbrir: (ruta: RutaNotificacion) => void
+  alAbrir: (ruta: RutaNotificacion, datos: Record<string, string>) => void
 ): () => void {
   const suscripcionRespuesta = Notifications.addNotificationResponseReceivedListener((respuesta) => {
-    const ruta = extraerRutaNotificacion(extraerDatosNotificacion(respuesta));
-    if (ruta) alAbrir(ruta);
+    const datos = extraerDatosNotificacion(respuesta);
+    const ruta = extraerRutaNotificacion(datos);
+    if (ruta) alAbrir(ruta, datos);
   });
 
   const suscripcionRecibida = Notifications.addNotificationReceivedListener(() => {
@@ -332,14 +355,15 @@ export function suscribirNotificaciones(
 
 /** Procesa el tap que abrió la app desde una notificación en frío. */
 export async function procesarNotificacionInicial(
-  alAbrir: (ruta: RutaNotificacion) => void
+  alAbrir: (ruta: RutaNotificacion, datos: Record<string, string>) => void
 ): Promise<void> {
   try {
     const respuesta = await Notifications.getLastNotificationResponseAsync();
     if (!respuesta) return;
 
-    const ruta = extraerRutaNotificacion(extraerDatosNotificacion(respuesta));
-    if (ruta) alAbrir(ruta);
+    const datos = extraerDatosNotificacion(respuesta);
+    const ruta = extraerRutaNotificacion(datos);
+    if (ruta) alAbrir(ruta, datos);
 
     await Notifications.clearLastNotificationResponseAsync();
   } catch {

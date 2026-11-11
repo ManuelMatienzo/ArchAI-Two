@@ -1,10 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Clave de API de Google Gemini (https://aistudio.google.com/apikey). Vacía = usar Ollama local. */
-  readonly VITE_GEMINI_API_KEY?: string;
-  /** Modelo Gemini opcional (defecto: gemini-2.5-flash). */
-  readonly VITE_GEMINI_MODEL?: string;
+  /** Dirección pública de Spring Boot. Las claves de IA permanecen en el backend. */
+  readonly VITE_ARCHAI_API_URL?: string;
 }
 
 interface ImportMeta {

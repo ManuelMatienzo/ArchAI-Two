@@ -16,13 +16,15 @@ import {
   Copy,
   Check,
   AlertCircle,
+  Eye,
 } from 'lucide-react-native';
 import { CollabMessage } from '../../types/uml';
 import { colors } from '../../theme/colors';
 
 interface ChatMessageItemProps {
   item: CollabMessage;
-  currentUser: { name: string; role: string };
+  currentUser: { id?: string; name: string; role: string };
+  onFocusClass?: (classId: string) => void;
 }
 
 const getRoleBadgeInfo = (role?: string) => {
@@ -60,14 +62,19 @@ const getRoleBadgeInfo = (role?: string) => {
 
 const getAvatarBg = (name: string) => {
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  const str = name || 'Usuario';
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
   const hues = [
-    'rgba(30, 41, 59, 0.95)',
-    'rgba(23, 26, 74, 0.95)',
-    'rgba(31, 41, 55, 0.95)',
-    'rgba(15, 23, 42, 0.95)',
+    '#2563eb', // Azul
+    '#7c3aed', // Púrpura
+    '#059669', // Esmeralda
+    '#d97706', // Ámbar
+    '#db2777', // Rosa
+    '#0891b2', // Cian
+    '#4f46e5', // Índigo
+    '#ea580c', // Naranja
   ];
   return hues[Math.abs(hash) % hues.length];
 };
@@ -75,21 +82,43 @@ const getAvatarBg = (name: string) => {
 export const ChatMessageItem: React.FC<ChatMessageItemProps> = memo(({
   item,
   currentUser,
+  onFocusClass,
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const isMyMessage =
-    item.sender === currentUser.name ||
-    item.senderRole === 'DESARROLLADOR_MOVIL' ||
-    item.senderRole === 'Desarrollador Móvil';
-
   const isAi =
-    item.isAiResponse ||
+    Boolean(item.isAiResponse) ||
     item.senderRole === 'ARCHAI_IA' ||
     item.senderRole === 'Agente IA Co-Developer' ||
-    item.sender.includes('ArchAI');
+    (typeof item.sender === 'string' && item.sender.includes('ArchAI'));
+
+  const senderId = item.senderId || item.authorId;
+  const rawSender = item.sender || 'Compañero';
+  const currentId = currentUser?.id;
+  const currentName = (currentUser?.name || '').trim().toLowerCase();
+  const senderNameClean = rawSender.trim().toLowerCase();
+
+  // Es mi mensaje ÚNICAMENTE si coincide mi senderId o mi nombre de usuario (y no es IA ni notificación)
+  const isMyMessage =
+    !isAi &&
+    !item.isSystemNotification &&
+    Boolean(
+      (senderId && currentId && senderId === currentId) ||
+      (!currentId && currentName && senderNameClean === currentName && currentName !== 'compañero' && currentName !== 'usuario' && currentName !== 'desarrollador móvil')
+    );
 
   const roleInfo = getRoleBadgeInfo(item.senderRole);
+
+  if (item.isSystemNotification) {
+    return (
+      <View style={styles.systemNotificationRow}>
+        <View style={styles.systemNotificationPill}>
+          <Sparkles size={11} color={colors.primary} style={{ marginRight: 6 }} />
+          <Text style={styles.systemNotificationText}>{item.content}</Text>
+        </View>
+      </View>
+    );
+  }
 
   const handleCopyCode = async (code: string) => {
     try {
@@ -167,10 +196,10 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = memo(({
               style={[
                 styles.senderName,
                 isAi && styles.aiSenderName,
-                isMyMessage && styles.mySenderName,
+                isMyMessage ? styles.mySenderName : styles.otherSenderName,
               ]}
             >
-              {isMyMessage ? 'Tú' : item.sender}
+              {isMyMessage ? 'Tú' : (item.sender || 'Compañero')}
             </Text>
           </View>
 
@@ -267,10 +296,10 @@ const styles = StyleSheet.create({
   },
   msgBubble: {
     flex: 1,
-    backgroundColor: colors.surfaceCard,
+    backgroundColor: 'rgba(23, 26, 74, 0.72)',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.borderGlass,
+    borderColor: 'rgba(56, 189, 248, 0.22)',
     padding: 11,
   },
   myBubble: {
@@ -332,6 +361,11 @@ const styles = StyleSheet.create({
   },
   mySenderName: {
     color: colors.primary,
+    fontWeight: '800',
+  },
+  otherSenderName: {
+    color: '#38bdf8',
+    fontWeight: '800',
   },
   metaRow: {
     flexDirection: 'row',
@@ -392,5 +426,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'monospace',
     lineHeight: 16,
+  },
+  systemNotificationRow: {
+    alignItems: 'center',
+    marginVertical: 6,
+    paddingHorizontal: 16,
+  },
+  systemNotificationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(47, 44, 121, 0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 195, 158, 0.25)',
+    borderRadius: 16,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+  },
+  systemNotificationText: {
+    fontSize: 11,
+    color: colors.primary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  focusClassBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    backgroundColor: 'rgba(232, 195, 158, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 195, 158, 0.35)',
+    borderRadius: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  focusClassBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
   },
 });

@@ -1,74 +1,57 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, Alert, ActivityIndicator } from 'react-native';
-import { Server, Cloud, Save, Wifi, CheckCircle2, AlertCircle } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors } from '../theme/colors';
-import { getBackendUrl, setBackendUrl, getDefaultBackendUrl, getAutoDetectedHost } from '../api/client';
 import {
   activarNotificacionesPush,
   desactivarNotificacionesPush,
   estaPushHabilitado,
-  type UsuarioPush,
+  type MotivoFalloPush,
 } from '../services/pushNotificationsService';
+import { readCurrentUser } from '../api/conversationApi';
+import { mobileStomp } from '../api/stompClient';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, Alert, ActivityIndicator } from 'react-native';
+import { Server, Cloud, Save, Wifi, CheckCircle2, AlertCircle } from 'lucide-react-native';
+import { colors } from '../theme/colors';
+import { getBackendUrl, setBackendUrl, getDefaultBackendUrl, getAutoDetectedHost } from '../api/client';
+
+const MENSAJES_PUSH: Record<MotivoFalloPush, string> = {
+  'permiso-denegado':
+    'No se concedió permiso. Puedes habilitar las notificaciones desde los ajustes del sistema.',
+  'sin-token':
+    'Este dispositivo no puede recibir notificaciones. Instala la compilación de ArchAI para activarlas.',
+  'registro-fallido': 'No se pudo registrar el dispositivo. Intenta de nuevo más tarde.',
+  'no-disponible': 'Las notificaciones no están disponibles en este dispositivo.',
+};
 
 export const SettingsScreen = ({ navigation }: any) => {
   const [serverUrl, setServerUrl] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [pushBusy, setPushBusy] = useState(false);
-  const [usuario, setUsuario] = useState<UsuarioPush | null>(null);
+  const [changingPush,setChangingPush]=useState(false);
+  useEffect(()=>{void estaPushHabilitado().then(setPushEnabled);void AsyncStorage.getItem('archai_offline_enabled').then(v=>setOfflineCacheEnabled(v!=='false'));},[]);
+  const togglePush=async(enabled:boolean)=>{
+    setChangingPush(true);
+    try{
+      if(enabled){
+        const usuario=await readCurrentUser();
+        if(!usuario?.id) throw new Error('Inicia sesión para recibir alertas en este dispositivo.');
+        const resultado=await activarNotificacionesPush({id:String(usuario.id),name:usuario.name});
+        if(!resultado.ok) throw new Error(MENSAJES_PUSH[resultado.motivo||'no-disponible']);
+        setPushEnabled(true);
+      }else{
+        await desactivarNotificacionesPush();
+        setPushEnabled(false);
+      }
+    }catch(e){
+      setPushEnabled(await estaPushHabilitado());
+      Alert.alert('Notificaciones',e instanceof Error?e.message:'No se pudo actualizar el permiso.');
+    }finally{setChangingPush(false);}
+  };
   const [offlineCacheEnabled, setOfflineCacheEnabled] = useState(true);
 
   useEffect(() => {
     getBackendUrl().then((url) => setServerUrl(url));
-    estaPushHabilitado().then(setPushEnabled).catch(() => {});
-    AsyncStorage.getItem('archai_session')
-      .then((raw) => {
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
-        const perfil = parsed?.user || parsed;
-        if (perfil?.id) {
-          setUsuario({ id: String(perfil.id), name: perfil.name });
-        }
-      })
-      .catch(() => {});
   }, []);
-
-  // CU-23 — Activa/desactiva notificaciones reales (permiso + token + registro backend).
-  const handleTogglePush = async (value: boolean) => {
-    if (pushBusy) return;
-
-    if (value && !usuario?.id) {
-      Alert.alert('Notificaciones', 'Inicia sesión para activar las notificaciones en este dispositivo.');
-      return;
-    }
-
-    setPushBusy(true);
-    setPushEnabled(value);
-
-    try {
-      if (value && usuario) {
-        const resultado = await activarNotificacionesPush(usuario);
-        if (!resultado.ok) {
-          setPushEnabled(false);
-          Alert.alert(
-            'Notificaciones',
-            resultado.motivo === 'permiso-denegado'
-              ? 'Activa el permiso de notificaciones de ArchAI en los ajustes del sistema.'
-              : 'No se pudieron activar las notificaciones en este dispositivo. Intenta de nuevo más tarde.'
-          );
-        }
-      } else {
-        await desactivarNotificacionesPush();
-      }
-    } catch {
-      setPushEnabled(!value);
-      Alert.alert('Notificaciones', 'No se pudieron actualizar las notificaciones. Intenta de nuevo más tarde.');
-    } finally {
-      setPushBusy(false);
-    }
-  };
 
   const handleTestConnection = async () => {
     if (!serverUrl.trim()) return;
@@ -77,15 +60,17 @@ export const SettingsScreen = ({ navigation }: any) => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${serverUrl.trim()}/auth/check`, {
+      const candidate=serverUrl.trim().replace(/\/$/,'');
+      const url=candidate.endsWith('/api/v1')?candidate:`${candidate}/api/v1`;
+      const res = await fetch(`${url}/auth/status`, {
         signal: controller.signal,
       }).catch(() => null);
       clearTimeout(timeoutId);
 
-      if (res && res.status < 500) {
+      if (res && res.ok) {
         setTestResult({ ok: true, message: 'Conexión exitosa con el backend.' });
       } else {
-        setTestResult({ ok: true, message: 'Servidor alcanzable en la red.' });
+        setTestResult({ ok: false, message: 'El servidor no respondió correctamente. Revisa la dirección.' });
       }
     } catch {
       setTestResult({ ok: false, message: 'No se pudo conectar al endpoint configurado.' });
@@ -99,7 +84,7 @@ export const SettingsScreen = ({ navigation }: any) => {
       Alert.alert('URL requerida', 'Por favor ingresa la URL del backend.');
       return;
     }
-    await setBackendUrl(serverUrl.trim());
+    try{await setBackendUrl(serverUrl.trim());mobileStomp.disconnect();}catch(e){Alert.alert('Servidor',e instanceof Error?e.message:'Dirección inválida.');return;}
     Alert.alert('Guardado', 'La configuración del servidor ha sido actualizada exitosamente.');
     navigation.goBack();
   };
@@ -199,8 +184,8 @@ export const SettingsScreen = ({ navigation }: any) => {
           </View>
           <Switch
             value={pushEnabled}
-            onValueChange={handleTogglePush}
-            disabled={pushBusy}
+            disabled={changingPush}
+            onValueChange={value=>void togglePush(value)}
             thumbColor={pushEnabled ? colors.primary : '#4b5563'}
             trackColor={{ false: '#374151', true: 'rgba(56, 189, 248, 0.4)' }}
           />
@@ -208,18 +193,19 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         <View style={[styles.switchRow, { borderTopWidth: 1, borderTopColor: colors.borderGlass, paddingTop: 14, marginTop: 14 }]}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.switchTitle}>Caché Offline (IndexedDB / Storage)</Text>
+            <Text style={styles.switchTitle}>Consulta sin conexión</Text>
             <Text style={styles.switchDesc}>Guardar último diagrama para visualización en vuelos o sin red</Text>
           </View>
           <Switch
             value={offlineCacheEnabled}
-            onValueChange={setOfflineCacheEnabled}
+            onValueChange={value=>{setOfflineCacheEnabled(value);void AsyncStorage.setItem('archai_offline_enabled',String(value));}}
             thumbColor={offlineCacheEnabled ? colors.primary : '#4b5563'}
             trackColor={{ false: '#374151', true: 'rgba(56, 189, 248, 0.4)' }}
           />
         </View>
       </View>
 
+      <TouchableOpacity style={styles.saveBtn} onPress={()=>navigation.navigate('Notifications')}><Text style={styles.saveBtnText}>Ver actividad del equipo</Text></TouchableOpacity>
       {/* Save Button */}
       <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
         <Save size={16} color={colors.textOnPrimary} style={{ marginRight: 6 }} />

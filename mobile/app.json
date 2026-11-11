@@ -10,14 +10,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.archai.mobile",
-      "infoPlist": {
-        "UIBackgroundModes": [
-          "remote-notification"
-        ]
-      }
+      "bundleIdentifier": "com.archai.mobile"
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#000020"
@@ -34,15 +30,18 @@
         "expo-notifications",
         {
           "color": "#38bdf8",
-          "defaultChannel": "archai-critical",
-          "enableBackgroundRemoteNotifications": true
+          "defaultChannel": "archai-critical"
         }
       ]
     ],
+    "owner": "manuwfs-team",
     "extra": {
+      "eas": {
+        "projectId": "3bd58fcf-4228-4f47-8bd5-875dab00a610"
+      },
       "archaiPush": {
-        "expoProjectId": "",
-        "androidChannelId": "archai-critical"
+        "channelId": "archai-critical",
+        "expoProjectId": "3bd58fcf-4228-4f47-8bd5-875dab00a610"
       }
     }
   }

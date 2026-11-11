@@ -70,7 +70,6 @@ export class MobileStompClient {
       try { await this.client.deactivate(); } catch {}
       this.client = null;
     }
-
     this.notifyStatus('conectando');
     const backendUrl = await getBackendUrl();
     const wsUrl = backendUrl
@@ -332,8 +331,26 @@ export class MobileStompClient {
         return;
       }
       // 2. Mensaje envuelto en MensajeColaboracionDto del backend ({ tipo: 'chat', payload: CollabMessage })
-      if (data && data.tipo === 'chat' && data.payload) {
-        callback(data.payload);
+      if (data && ['chat','chat_message'].includes(data.tipo) && data.payload && (!data.payload.status||data.payload.status==='sent')) {
+        const p = data.payload;
+        const adapted: CollabMessage = {
+          id: p.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          roomId: p.roomId || roomId,
+          senderId: p.authorId || p.senderId || p.emisorId || (p.role === 'ai' ? 'ai-assistant' : undefined),
+          authorId: p.authorId || p.senderId,
+          sender: p.authorName || p.sender || p.emisorNombre || (p.role === 'ai' ? 'ArchAI Assistant' : 'Compañero'),
+          senderRole: p.role === 'ai' ? 'ARCHAI_IA' : (p.senderRole || p.rol || 'DESARROLLADOR_MOVIL'),
+          content: p.text !== undefined ? p.text : (p.content || ''),
+          timestamp: p.createdAt ? new Date(p.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (p.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+          fullDate: p.createdAt || p.fullDate || new Date().toISOString(),
+          isAiResponse: p.role === 'ai' || Boolean(p.isAiResponse),
+          status: 'entregado',
+          avatarColor: p.avatarColor,
+          codeSnippet: p.codeSnippet,
+          targetClassId: p.targetClassId,
+          isSystemNotification: Boolean(p.isSystemNotification),
+        };
+        callback(adapted);
         return;
       }
     };

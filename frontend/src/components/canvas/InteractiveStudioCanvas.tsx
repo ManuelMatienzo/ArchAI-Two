@@ -2727,14 +2727,13 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         const endX = src.x + src.w - 45;
         const endY = src.y;
 
-        const c1X = src.x + src.w + 65;
-        const c1Y = src.y + 10;
-        const c2X = src.x + src.w - 10;
-        const c2Y = src.y - 60;
-
-        const pathD = `M ${startX} ${startY} C ${c1X} ${c1Y}, ${c2X} ${c2Y}, ${endX} ${endY}`;
-        const midX = src.x + src.w + 30;
-        const midY = src.y - 20;
+        // Línea ortogonal en L para relación autológica (UML 2.5)
+        const loopSize = 55;
+        const cornerX = startX + loopSize;
+        const cornerY = startY - loopSize;
+        const pathD = `M ${startX} ${startY} L ${cornerX} ${startY} L ${cornerX} ${cornerY} L ${endX} ${cornerY} L ${endX} ${endY}`;
+        const midX = cornerX;
+        const midY = cornerY - 15;
 
         return {
           id: rel.id,
@@ -2850,49 +2849,74 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         }
       }
 
-      // Puntos de control BÃ©zier cÃºbicos con curvatura fluida y tangencia
-      let c1X = startX;
-      let c1Y = startY;
-      let c2X = endX;
-      let c2Y = endY;
+      // Líneas ortogonales UML 2.5: solo segmentos rectos con ángulos de 90°
+      // (sin curvas Bézier). Un solo escalón intermedio cuando hay desnivel.
+      const orthogonalPath = (
+        sX: number, sY: number, eX: number, eY: number,
+        sSide: AnchorSide, tSide: AnchorSide
+      ): { pathD: string; midX: number; midY: number } => {
+        // Puntos intermedios para el escalón (mitad del trayecto dominante)
+        const midX = (sX + eX) / 2;
+        const midY = (sY + eY) / 2;
 
-      if (srcSide === 'RIGHT' || srcSide === 'LEFT') {
-        if (Math.abs(startY - endY) < 1.5) {
-          c1X = (startX + endX) / 2;
-          c1Y = startY;
-          c2X = (startX + endX) / 2;
-          c2Y = endY;
-        } else {
-          const dist = Math.max(35, Math.min(180, Math.abs(endX - startX) * 0.45));
-          const sDir = srcSide === 'RIGHT' ? 1 : -1;
-          const tDir = tgtSide === 'LEFT' ? -1 : 1;
-          c1X = startX + sDir * dist;
-          c1Y = startY;
-          c2X = endX + tDir * dist;
-          c2Y = endY;
+        let pathD: string;
+        let labelMidX: number;
+        let labelMidY: number;
+
+        // Casos opuestos horizontales: RIGHT->LEFT o LEFT->RIGHT
+        if ((sSide === 'RIGHT' && tSide === 'LEFT') || (sSide === 'LEFT' && tSide === 'RIGHT')) {
+          if (Math.abs(sY - eY) < 2) {
+            // Misma altura: línea recta horizontal
+            pathD = `M ${sX} ${sY} L ${eX} ${eY}`;
+            labelMidX = midX;
+            labelMidY = sY;
+          } else {
+            // Escalón: horizontal -> vertical -> horizontal en punto medio X
+            pathD = `M ${sX} ${sY} L ${midX} ${sY} L ${midX} ${eY} L ${eX} ${eY}`;
+            labelMidX = midX;
+            labelMidY = (sY + eY) / 2;
+          }
         }
-      } else {
-        if (Math.abs(startX - endX) < 1.5) {
-          c1X = startX;
-          c1Y = (startY + endY) / 2;
-          c2X = endX;
-          c2Y = (startY + endY) / 2;
-        } else {
-          const dist = Math.max(35, Math.min(180, Math.abs(endY - startY) * 0.45));
-          const sDir = srcSide === 'BOTTOM' ? 1 : -1;
-          const tDir = tgtSide === 'TOP' ? -1 : 1;
-          c1X = startX;
-          c1Y = startY + sDir * dist;
-          c2X = endX;
-          c2Y = endY + tDir * dist;
+        // Casos opuestos verticales: BOTTOM->TOP o TOP->BOTTOM
+        else if ((sSide === 'BOTTOM' && tSide === 'TOP') || (sSide === 'TOP' && tSide === 'BOTTOM')) {
+          if (Math.abs(sX - eX) < 2) {
+            // Misma vertical: línea recta vertical
+            pathD = `M ${sX} ${sY} L ${eX} ${eY}`;
+            labelMidX = sX;
+            labelMidY = midY;
+          } else {
+            // Escalón: vertical -> horizontal -> vertical en punto medio Y
+            pathD = `M ${sX} ${sY} L ${sX} ${midY} L ${eX} ${midY} L ${eX} ${eY}`;
+            labelMidX = (sX + eX) / 2;
+            labelMidY = midY;
+          }
         }
-      }
+        // Lados adyacentes: giro en L con un solo ángulo de 90°
+        else {
+          // Elegir el punto de giro que minimice el trazado: ir primero en la dirección del origen
+          let cornerX: number, cornerY: number;
+          if (sSide === 'RIGHT' || sSide === 'LEFT') {
+            // Salir horizontalmente del origen, luego girar verticalmente hacia el destino
+            cornerX = eX;
+            cornerY = sY;
+            // Si el punto de giro cae dentro del destino, ajustar para no entrar en la caja
+            if (tSide === 'TOP' || tSide === 'BOTTOM') {
+              cornerX = sSide === 'RIGHT' ? Math.min(eX, sX + Math.abs(eX - sX) * 0.5) : Math.max(eX, sX - Math.abs(eX - sX) * 0.5);
+            }
+          } else {
+            // Salir verticalmente del origen, luego girar horizontalmente hacia el destino
+            cornerX = sX;
+            cornerY = eY;
+          }
+          pathD = `M ${sX} ${sY} L ${cornerX} ${cornerY} L ${eX} ${eY}`;
+          labelMidX = (sX + cornerX + eX) / 3;
+          labelMidY = (sY + cornerY + eY) / 3;
+        }
 
-      const pathD = `M ${startX} ${startY} C ${c1X} ${c1Y}, ${c2X} ${c2Y}, ${endX} ${endY}`;
+        return { pathD, midX: labelMidX, midY: labelMidY };
+      };
 
-      // Punto medio matemÃ¡tico exacto de la curva BÃ©zier cÃºbica en t = 0.5 (garantiza que la pastilla estÃ© sobre la lÃ­nea)
-      const midX = 0.125 * startX + 0.375 * c1X + 0.375 * c2X + 0.125 * endX;
-      const midY = 0.125 * startY + 0.375 * c1Y + 0.375 * c2Y + 0.125 * endY;
+      const { pathD, midX, midY } = orthogonalPath(startX, startY, endX, endY, srcSide, tgtSide);
 
       // Multiplicidad en coordenadas seguras exteriores (fuera de las cajas de clase)
       let srcMultX = startX;
@@ -3241,8 +3265,11 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       onDrop={handleCanvasDrop}
       style={{
         flex: 1,
+        minHeight: 0,
+        minWidth: 0,
         position: 'relative',
-        overflow: 'hidden',
+        // Pan and zoom use transforms. Clipping prevents keyboard focus from scrolling this viewport.
+        overflow: 'clip',
         background: 'var(--bg-canvas)',
         cursor: isPanning ? 'grabbing' : ((isRelationMode || connectingSourceId) ? 'crosshair' : (isSpacePressed ? 'grab' : 'default'))
       }}
@@ -3305,6 +3332,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
         {/* Render Connection Lines (UML 2.5 rigorous rendering) */}
         <RelationLayer
+          deletionIds={new Set((proposalDraft?.deletions||[]).flatMap(d=>d.kind==='relation'?[d.targetId]:d.affectedRelationIds))}
           draftIds={ghostRelationIds}
           paths={relationPaths}
           selectedRelationId={selectedRelationId}
@@ -4107,6 +4135,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         {displayedClasses.map(cls => (
           <UmlNodeCard
             key={cls.id}
+            proposedDeletion={proposalDraft?.deletions?.some(d=>d.kind==='class'?d.targetId===cls.id:d.classId===cls.id)}
             cls={cls}
             draft={ghostIds.has(cls.id)}
             diagram={ghostIds.has(cls.id)?{...diagram,classes:displayedClasses,relations:[...diagram.relations,...(proposalDraft?.relations || [])]}:diagram}
@@ -4322,7 +4351,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             borderRadius: '16px',
             padding: '6px 10px',
             boxShadow: 'var(--glass-topbar-shadow)',
-            maxWidth: 'calc(100vw - 32px)',
+            maxWidth: 'calc(100% - 24px)',
             overflowX: 'auto'
           }}
         >

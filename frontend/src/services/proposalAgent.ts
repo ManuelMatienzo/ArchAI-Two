@@ -26,7 +26,7 @@ export async function listLocalModels(signal?: AbortSignal): Promise<string[]> {
 export function semanticDiagram(diagram: ModeloDiagrama): string {
   return serializarModeloUML({ ...diagram, classes: [...diagram.classes].sort((a,b) => a.id.localeCompare(b.id)), relations: [...diagram.relations].sort((a,b) => a.id.localeCompare(b.id)) });
 }
-export async function suggest(prompt: string, diagram: ModeloDiagrama, cloud: boolean, signal: AbortSignal, selectedModel?: string, mode: InferenceMode = cloud ? 'hybrid' : 'local', request?: CloudRequest): Promise<Pick<Proposal, 'diagram' | 'explanation' | 'provider' | 'model' | 'status'>> {
+export async function suggest(prompt: string, diagram: ModeloDiagrama, _cloud: boolean, signal: AbortSignal, selectedModel?: string, mode: InferenceMode = 'cloud', request?: CloudRequest): Promise<Pick<Proposal, 'diagram' | 'explanation' | 'provider' | 'model' | 'status'>> {
   const system = `Eres @ArchAI, asesor UML del equipo. Propón, no apliques cambios. Responde SOLO JSON: {"explanation":"justificación breve en español","classes":[{"name":"Clase","attributes":[{"name":"id","type":"Long"}],"methods":[]}],"relations":[{"sourceName":"A","targetName":"B","type":"ASSOCIATION_1_N"}]}. Para modificar una clase existente incluye targetClassId con su ID real; devuelve solo los miembros que propones cambiar o añadir. Puedes relacionar clases nuevas con clases existentes por sourceName/targetName sin repetir las existentes. No propongas eliminaciones implícitas. Para una consulta ambigua devuelve {"clarification":"pregunta concreta"}. En revisión automática devuelve {"skip":true} si no hay mejora importante. Contexto actual:\n${semanticDiagram(diagram)}`;
   const parse = (text: string, provider: string) => {
     const json = extraerJSON(text);
@@ -66,10 +66,14 @@ export async function suggest(prompt: string, diagram: ModeloDiagrama, cloud: bo
     return {...result, model};
   } catch (error) {
     if (signal.aborted) throw error;
-    if (mode === 'local' || !cloud) {
-      if (error instanceof Error && error.name === 'TimeoutError') throw new Error('El modelo local tardó más de un minuto. Intenta otra vez o elige un modelo más ligero.');
-      throw new Error(error instanceof Error && !['TypeError','SyntaxError'].includes(error.name) ? error.message : 'No se pudo obtener una propuesta válida del modelo local. Intenta nuevamente.');
+    if (request) {
+      try {
+        return await cloudProposal();
+      } catch (cloudErr) {
+        throw cloudErr;
+      }
     }
-    return await cloudProposal();
+    if (error instanceof Error && error.name === 'TimeoutError') throw new Error('El modelo local tardó más de un minuto. Intenta otra vez o elige un modelo más ligero.');
+    throw new Error(error instanceof Error && !['TypeError','SyntaxError'].includes(error.name) ? error.message : 'No se pudo obtener una propuesta válida. Intenta nuevamente.');
   }
 }

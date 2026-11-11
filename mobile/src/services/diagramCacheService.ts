@@ -21,7 +21,7 @@ export const diagramCacheService = {
    * Obtiene el diagrama cacheado en memoria (L1) o en disco (L2).
    */
   getCachedDiagram: async (roomId: string): Promise<DiagramData | null> => {
-    if (!roomId) return null;
+    if (!roomId || await AsyncStorage.getItem('archai_offline_enabled')==='false') return null;
 
     // 1. Verificación en memoria L1 (0 ms)
     const memEntry = memoryCache.get(roomId);
@@ -54,7 +54,7 @@ export const diagramCacheService = {
    * Almacena el diagrama en memoria (L1) y en almacenamiento local (L2).
    */
   saveCachedDiagram: async (roomId: string, data: DiagramData): Promise<void> => {
-    if (!roomId || !data) return;
+    if (!roomId || !data || await AsyncStorage.getItem('archai_offline_enabled')==='false') return;
 
     const payload: DiagramData = {
       classes: data.classes || [],

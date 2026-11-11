@@ -1,0 +1,85 @@
+# =====================
+# ArchAI - .gitignore raíz
+# =====================
+
+# ---- Backend (Spring Boot / Maven) ----
+backend/target/
+.maven-cache/
+*.jar
+*.war
+*.ear
+
+# ---- Frontend (React / Vite / TypeScript) ----
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/vite.preview.local.mjs
+*.tsbuildinfo
+
+# ---- Mobile (React Native / Expo) ----
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/*.jks
+mobile/*.p8
+mobile/*.p12
+mobile/*.key
+mobile/*.mobileprovision
+mobile/*.orig.*
+
+# ---- Entorno y credenciales ----
+# (nunca subir variables de entorno con secretos)
+.env
+.env.local
+.env.production
+.env.development
+*.env
+!*.env.example
+!.env.example
+
+# ---- Logs ----
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- IDE y editores ----
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.code-workspace
+
+# ---- SO / misc ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.env.local
+mobile/google-services.json
+mobile/*service-account*.json
+mobile/*firebase-adminsdk*.json
+mobile/credentials.json
+*.jks
+*.keystore
+.archai/
+frontend/vite.team-test.local.mjs
+
+# Only the Android client is needed by EAS Build.
+.git/
+/backend/
+/frontend/
+/Documentos/
+/Obsidian_ArchAI_Vault/
+**/.env*
+**/*service-account*.json
+**/*firebase-adminsdk*.json
+**/credentials.json
+# Firebase client configuration belongs in EAS's private build archive, never Git.
+!mobile/google-services.json

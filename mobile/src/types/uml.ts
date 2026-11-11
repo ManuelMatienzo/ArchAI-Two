@@ -52,6 +52,7 @@ export interface GhostDraftProposal {
   timestamp: string;
   classes: UmlClass[];
   relationships: UmlRelationship[];
+  deletions?: Array<{id:string;kind:'class'|'attribute'|'method'|'relation';targetId:string;classId:string;label:string;affectedRelationIds:string[]}>;
 }
 
 export type CollabRole = 
@@ -76,6 +77,9 @@ export type StompConnectionStatus = 'desconectado' | 'conectando' | 'conectado' 
 
 export interface CollabMessage {
   id: string;
+  senderId?: string;
+  authorId?: string;
+  messageRole?: 'human' | 'ai' | 'system';
   sender: string;
   senderRole: CollabRole;
   avatarColor?: string;
@@ -86,6 +90,13 @@ export interface CollabMessage {
   roomId: string;
   status?: MessageDeliveryStatus;
   codeSnippet?: CodeSnippet;
+  targetClassId?: string;
+  isSystemNotification?: boolean;
+  proposalMetadata?: {
+    proposalId?: string;
+    status?: string;
+    author?: string;
+  };
 }
 
 export interface UserSession {

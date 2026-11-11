@@ -1,13 +1,2 @@
-import { loadEnv } from 'vite';
-import { fileURLToPath } from 'node:url';
-
-// Only explicitly public VITE variables may enter the client bundle.
-export function geminiEnvConfig(mode) {
-  const root = loadEnv(mode, fileURLToPath(new URL('../', import.meta.url)), 'VITE_');
-  const frontend = loadEnv(mode, fileURLToPath(new URL('./', import.meta.url)), 'VITE_');
-  const names = ['VITE_GEMINI_API_KEY', 'VITE_GEMINI_MODEL'];
-  return Object.fromEntries(names.map(name => [
-    `import.meta.env.${name}`,
-    JSON.stringify(frontend[name] || root[name] || '')
-  ]));
-}
+// Provider credentials are server-only, including when an old VITE key remains in a local file.
+export function geminiEnvConfig(_mode){return {'import.meta.env.VITE_GEMINI_API_KEY':'""','import.meta.env.VITE_ANTHROPIC_API_KEY':'""'};}

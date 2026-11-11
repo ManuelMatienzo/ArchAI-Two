@@ -25,7 +25,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { InformacionSesion } from '../../types/auth';
 import { ModeloDiagrama } from '../../types/uml';
-import { listarProyectos, listarDiagramas, crearProyecto, unirseProyectoPorCodigo, Proyecto } from '../../services/api';
+import { ApiError, listarProyectos, listarDiagramas, guardarDiagramaEnNube, crearProyecto, unirseProyectoPorCodigo, Proyecto } from '../../services/api';
 import { mergeProjectDiagrams, DiagramaResumen } from '../../services/projectDiagrams';
 import { obtenerDiagramaPorId } from '../../services/diagramasPredefinidos';
 import { GlassModal } from '../../components/glass/GlassModal';
@@ -281,7 +281,11 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
             : existing?.diagramas || []};
         }));
       })
-      .catch(() => {});
+      .catch(error => {
+        if (montado && !(error instanceof ApiError && error.status === 401)) {
+          notificar('No se pudieron cargar tus proyectos. Intenta de nuevo más tarde.');
+        }
+      });
     return () => {
       montado = false;
     };
@@ -401,28 +405,16 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         propietarioId: session.currentUser.id
       });
 
-      const diagId = `diag-${creado.id}-1`;
-      const nuevoPrj: Proyecto & { diagramas: DiagramaResumen[] } = {
-        ...creado,
-        diagramas: [
-          {
-            id: diagId,
-            proyectoId: creado.id,
-            titulo: `Modelo Dominio - ${creado.nombre}`,
-            totalClases: 2,
-            totalRelaciones: 1,
-            actualizadoEn: 'Recién creado'
-          }
-        ]
-      };
+      const saved=await guardarDiagramaEnNube({title:`Modelo Dominio - ${creado.nombre}`,classes:[],relations:[],updatedAt:new Date().toISOString()},creado.id,session.currentUser.id);
+      const nuevoPrj:Proyecto & {diagramas:DiagramaResumen[]}={...creado,diagramas:mergeProjectDiagrams(creado.id,[saved],[])};
 
       setProyectos(prev => [nuevoPrj, ...prev]);
       setNombreNuevoProyecto('');
       setDescNuevoProyecto('');
       setModalNuevoProyecto(false);
       notificar(`Proyecto "${creado.nombre}" creado exitosamente.`);
-    } catch {
-      setErrorNuevoProyecto('No se pudo crear el proyecto. Intenta de nuevo más tarde.');
+    } catch (error) {
+      setErrorNuevoProyecto(error instanceof ApiError ? error.message : 'No se pudo crear el proyecto. Intenta de nuevo más tarde.');
     } finally {
       setCargando(false);
     }
@@ -505,57 +497,23 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   };
 
   // Crear diagrama dentro de un proyecto
-  const handleCrearDiagrama = (proyectoId: string) => {
-    if (!nombreNuevoDiagrama.trim()) return;
-    const nuevoDiagId = 'diag-' + Date.now();
-    const nuevoDiagrama: DiagramaResumen = {
-      id: nuevoDiagId,
-      proyectoId,
-      titulo: nombreNuevoDiagrama.trim(),
-      totalClases: 1,
-      totalRelaciones: 0,
-      actualizadoEn: 'Recién creado'
-    };
-
-    setProyectos(prev =>
-      prev.map(p => {
-        if (p.id === proyectoId) {
-          const diags = p.diagramas || [];
-          return {
-            ...p,
-            totalDiagramas: diags.length + 1,
-            diagramas: [nuevoDiagrama, ...diags]
-          };
-        }
-        return p;
-      })
-    );
-
-    setNombreNuevoDiagrama('');
-    setModalNuevoDiagrama(null);
-    notificar(`Diagrama "${nuevoDiagrama.titulo}" añadido.`);
-
-    // Abrir de inmediato en el estudio con persistencia local
-    const nuevoModelo: ModeloDiagrama = {
-      title: nuevoDiagrama.titulo,
-      updatedAt: new Date().toISOString(),
-      classes: [
-        {
-          id: `cls-${Date.now()}`,
-          name: 'NuevaEntidad',
-          stereotype: 'Entity',
-          attributes: [{ id: 'a1', name: 'id', type: 'Long', visibility: '-', isPrimaryKey: true, isNullable: false }],
-          methods: [{ id: 'm1', name: 'getId', returnType: 'Long', visibility: '+', parameters: '' }],
-          position: { x: 280, y: 160 }
-        }
-      ],
-      relations: []
-    };
+  const handleCrearDiagrama = async (proyectoId:string) => {
+    if(!nombreNuevoDiagrama.trim()||cargando)return;setCargando(true);
     try {
-      localStorage.setItem(`archai_diagram_${nuevoDiagId}`, JSON.stringify(nuevoModelo));
-    } catch {}
-    const codigoSalaProyecto = proyectos.find(p => p.id === proyectoId)?.codigoAcceso;
-    onOpenStudio(nuevoModelo, nuevoDiagrama.titulo, nuevoDiagId, codigoSalaProyecto);
+      const model: ModeloDiagrama = { title: nombreNuevoDiagrama.trim(), classes: [], relations: [], updatedAt: new Date().toISOString() };
+      const saved = await guardarDiagramaEnNube(model, proyectoId, session.currentUser.id);
+      const [nuevo] = mergeProjectDiagrams(proyectoId, [saved], []);
+      setProyectos(prev => prev.map(p => p.id === proyectoId ? { ...p, diagramas: [nuevo, ...(p.diagramas || [])], totalDiagramas: (p.diagramas?.length || 0) + 1 } : p));
+      setNombreNuevoDiagrama('');
+      setModalNuevoDiagrama(null);
+      notificar(`Diagrama "${nuevo.titulo}" añadido.`);
+      const codigoSalaProyecto = proyectos.find(p => p.id === proyectoId)?.codigoAcceso;
+      onOpenStudio(nuevo.data, nuevo.titulo, nuevo.id, codigoSalaProyecto);
+    } catch (e) {
+      notificar(e instanceof Error ? e.message : 'No se pudo guardar el diagrama. Intenta nuevamente.');
+    } finally {
+      setCargando(false);
+    }
   };
 
   // Abrir modal de edición de diagrama

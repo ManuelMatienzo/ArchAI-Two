@@ -25,6 +25,7 @@ export interface RelationPathData {
 }
 
 interface RelationLayerProps {
+  deletionIds?:Set<string>;
   draftIds?: Set<string>;
   paths: RelationPathData[];
   selectedRelationId: string | null;
@@ -97,6 +98,7 @@ function relationDefaults(r: RelationPathData) {
  * Refactor 2026-09-26 · Fase 1 (legibilidad + rendimiento) · sin cambios de lógica.
  */
 export const RelationLayer: React.FC<RelationLayerProps> = React.memo(function RelationLayer({
+  deletionIds,
   draftIds,
   paths,
   selectedRelationId,
@@ -135,7 +137,7 @@ export const RelationLayer: React.FC<RelationLayerProps> = React.memo(function R
         return (
           <g
             key={r.id}
-            className={`uml-relation-interactive ${draftIds?.has(r.id) ? 'proposal-ghost-relation' : ''}`}
+            className={`uml-relation-interactive ${deletionIds?.has(r.id)?'proposal-delete-relation':''} ${draftIds?.has(r.id) ? 'proposal-ghost-relation' : ''}`}
             style={{ cursor: 'pointer' }}
             onMouseDown={selectHandlers.onMouseDown}
             onClick={selectHandlers.onClick}

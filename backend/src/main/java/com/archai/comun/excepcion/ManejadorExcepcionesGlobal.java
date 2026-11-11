@@ -37,6 +37,18 @@ public class ManejadorExcepcionesGlobal {
         return org.springframework.http.ResponseEntity.status(ex.getStatusCode()).body(java.util.Map.of("mensaje", ex.getReason() == null ? "No se pudo completar la operación." : ex.getReason()));
     }
 
+    /** Una ruta inexistente es un 404, no un error interno del servidor. */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> manejarRutaNoEncontrada(
+            org.springframework.web.servlet.resource.NoResourceFoundException ex) {
+        Map<String, Object> respuesta = new HashMap<>();
+        respuesta.put("timestamp", LocalDateTime.now());
+        respuesta.put("status", HttpStatus.NOT_FOUND.value());
+        respuesta.put("error", "Ruta no encontrada");
+        respuesta.put("mensaje", "El recurso solicitado no existe.");
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(respuesta);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> manejarExcepcionGeneral(Exception ex) {
         Map<String, Object> respuesta = new HashMap<>();

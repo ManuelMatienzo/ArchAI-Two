@@ -522,7 +522,45 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 0 25px rgba(232, 195, 158, 0.30), inset 0 1px 1px rgba(245, 225, 206, 0.30) !important;
 }
 
-/* Inline edit forms inside node cards */
+/* ======================================================== */
+/* UML 2.5+ COMPARTMENT STYLES                              */
+/* ======================================================== */
+
+.uml-compartment-name {
+  /* El nombre de la clase va centrado en su compartimento superior */
+}
+
+.uml-compartment-attrs {
+  /* Compartimento de atributos con línea divisoria inferior */
+}
+
+.uml-compartment-methods {
+  /* Compartimento de operaciones/métodos */
+}
+
+/* Estilos de relación ortogonal UML 2.5+ */
+.uml-relation-line {
+  stroke-linejoin: round;
+  stroke-linecap: butt;
+}
+
+/* Marcadores de flecha UML 2.5 mejorados en SvgDefs ya existen;
+   aquí aseguramos que las líneas ortogonales se vean limpias */
+.uml-relation-interactive path {
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
+}
+
+/* Hit-area más amplia para facilitar selección de relaciones */
+.uml-relation-hitbox {
+  stroke: rgba(0, 0, 0, 0);
+  stroke-width: 24;
+  stroke-linecap: round;
+  pointer-events: stroke;
+}
+
+/* ======================================================== */
+/* INLINE EDIT FORMS INSIDE NODE CARDS                      */
+/* ======================================================== */
 .uml-class-node form {
   background: var(--glass-node-header-bg);
   border: 1px solid var(--glass-node-header-border);
@@ -1571,7 +1609,7 @@ h1, h2, h3, h4, h5, h6 {
     bottom: 12px !important;
     padding: 5px 8px !important;
     gap: 4px !important;
-    max-width: calc(100vw - 16px) !important;
+    max-width: calc(100% - 16px) !important;
   }
   .glass-code-dock {
     width: 100vw !important;

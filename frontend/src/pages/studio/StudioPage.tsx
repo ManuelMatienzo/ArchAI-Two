@@ -5,7 +5,7 @@ import { LeftNavRail as BarraLateralNavegacion } from '../../components/layout/L
 import { TopHeader as BarraSuperior } from '../../components/layout/TopHeader';
 import { ProjectStructureFlyout as PanelEstructuraProyecto } from '../../components/canvas/ProjectStructureFlyout';
 import { InteractiveStudioCanvas as LienzoInteractivoStudio } from '../../components/canvas/InteractiveStudioCanvas';
-import { FloatingAiAssistant as AsistenteIaFlotante } from '../../components/voice/FloatingAiAssistant';
+import { TeamChatDock, TeamChatMessage } from '../../components/collaboration/TeamChatDock';
 import { CollaborationPanel as PanelColaboracion } from '../../components/collaboration/CollaborationPanel';
 import { RolEquipo, PermisosUsuario, MiembroEquipo, obtenerPermisosRol } from '../../types/rbac';
 
@@ -40,10 +40,12 @@ import { useProposalReview } from '../../components/collaboration/useProposalRev
 import { ProposalToolbar } from '../../components/collaboration/ProposalReviewEditor';
 import { ProposalPanel, useProposals } from '../../components/collaboration/ProposalPanel';
 import { generateXmiXml } from '../../services/codeGenerator';
+import { reportArtifact } from '../../services/projectActivity';
 import { exportarXmiEnterpriseArchitect } from '../../services/exportarXmiEA';
 import { normalizarDiagrama } from '../../services/agenteDiagrama';
 import { sanitizarDiagramaUML25 } from '../../services/semanticDomainEngine';
 import {
+  apiFetch,
   guardarDiagramaEnNube,
   listarVersiones,
   crearVersion,
@@ -56,6 +58,10 @@ import {
   construirPayloadDiagrama,
   obtenerDiagramaSala,
   actualizarDiagramaSala,
+  guardarContextoDiagrama,
+  obtenerContextoDiagrama,
+  guardarContextoSala,
+  obtenerContextoSala,
   encolarOperacionOffline,
   sincronizarColaOffline,
   obtenerColaOffline
@@ -71,6 +77,7 @@ export interface StudioPageProps {
   onOpenProjects?: () => void;
   projectTitle?: string;
   diagramId?: string;
+  roomId?: string;
   initialTab?: 'canvas' | 'team' | 'settings';
   initialDock?: 'code' | 'ai' | null;
 }
@@ -179,6 +186,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   onOpenProjects: propOnOpenProjects,
   projectTitle: propProjectTitle,
   diagramId: propDiagramId,
+  roomId: propRoomId,
   initialTab,
   initialDock
 }) => {
@@ -187,10 +195,13 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const [searchParams] = useSearchParams();
   const location = useLocation();
 
-  const diagramId = propDiagramId || params.diagramId || searchParams.get('diagramId') || (location.state as any)?.diagramId || localStorage.getItem('archai_selected_diagram_id') || undefined;
-  const projectTitle = propProjectTitle || searchParams.get('title') || (location.state as any)?.projectTitle || localStorage.getItem('archai_selected_project_title') || undefined;
-  const initialDiagram = propInitialDiagram || (location.state as any)?.diagram;
-  const urlRoomId = params.roomId || searchParams.get('roomId') || undefined;
+  const urlRoomId = propRoomId || params.roomId || searchParams.get('roomId') || undefined;
+  const explicitDiagramId=params.diagramId||searchParams.get('diagramId')||(location.state as any)?.diagramId;
+  const [resolvedRoomDiagramId,setResolvedRoomDiagramId]=useState<string|undefined>();
+  const diagramId=explicitDiagramId||(urlRoomId?resolvedRoomDiagramId:propDiagramId||localStorage.getItem('archai_selected_diagram_id')||undefined);
+  const projectTitle=searchParams.get('title')||(location.state as any)?.projectTitle||propProjectTitle||localStorage.getItem('archai_selected_project_title')||undefined;
+  const initialDiagram=(location.state as any)?.diagram||(!urlRoomId&&propDiagramId===diagramId?propInitialDiagram:undefined);
+  useEffect(()=>{if(!urlRoomId||explicitDiagramId)return;let active=true;void apiFetch<any>(`/api/v1/colaboracion/salas/${encodeURIComponent(urlRoomId)}`).then(room=>{if(active)setResolvedRoomDiagramId(room.diagramId);}).catch(e=>{if(active)setSaveInfo({tipo:'error',texto:e.message});});return()=>{active=false;};},[urlRoomId,explicitDiagramId]);
 
   const [currentSession, setCurrentSession] = useState<InformacionSesion>(() => {
     if (propSession) {
@@ -230,9 +241,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   useEffect(() => {
     if (propSession) {
       if (urlRoomId && propSession.roomId !== urlRoomId) {
-        setCurrentSession({ ...propSession, roomId: urlRoomId, roomName: `Sala ${urlRoomId}` });
+        setCurrentSession(prev => prev.currentUser.id===propSession.currentUser.id ? prev : { ...propSession, roomId: urlRoomId, roomName: `Sala ${urlRoomId}` });
       } else {
-        setCurrentSession(propSession);
+        setCurrentSession(prev => prev.currentUser.id===propSession.currentUser.id ? prev : propSession);
       }
     } else {
       const guardado = localStorage.getItem('archai_session');
@@ -280,7 +291,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         const guardado = localStorage.getItem(`archai_diagram_${diagramId}`);
         if (guardado) {
           const parsed = JSON.parse(guardado);
-          if (parsed?.classes?.length) {
+          if (Array.isArray(parsed?.classes) && Array.isArray(parsed?.relations)) {
             const pTitle = (projectTitle || initialDiagram?.title || '').toLowerCase();
             const esHosp = pTitle.includes('hospit') || pTitle.includes('clíni') || pTitle.includes('clinic') || pTitle.includes('médic') || pTitle.includes('salud');
             const tieneProduct = parsed.classes.some((c: any) => c.name === 'ProductController' || c.name === 'Product');
@@ -292,11 +303,12 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       } catch {}
     }
     if (initialDiagram) return initialDiagram;
+    if (diagramId) return { title: projectTitle || 'Diagrama', classes: [], relations: [], updatedAt: new Date().toISOString() };
     try {
       const guardadoGeneral = localStorage.getItem('archai_selected_diagram');
       if (guardadoGeneral) {
         const parsed = JSON.parse(guardadoGeneral);
-        if (parsed?.classes?.length) return parsed;
+        if (Array.isArray(parsed?.classes) && Array.isArray(parsed?.relations)) return parsed;
       }
     } catch {}
     if (projectTitle) return { ...DIAGRAMA_INICIAL_DEFECTO, title: projectTitle };
@@ -309,13 +321,13 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     if (tabParam === 'team' || tabParam === 'settings' || tabParam === 'canvas') return tabParam;
     return 'canvas';
   });
+  const [isTeamChatOpen, setIsTeamChatOpen] = useState<boolean>(false);
+  const [teamChatMessages, setTeamChatMessages] = useState<TeamChatMessage[]>([]);
+  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+
   const [isCodeDockOpen, setIsCodeDockOpen] = useState<boolean>(() => {
     if (initialDock === 'code') return true;
     return searchParams.get('dock') === 'code';
-  });
-  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState<boolean>(() => {
-    if (initialDock === 'ai') return true;
-    return searchParams.get('dock') === 'ai';
   });
   const [showWhiteboardModal, setShowWhiteboardModal] = useState<boolean>(false);
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
@@ -341,7 +353,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         const guardado = localStorage.getItem(`archai_diagram_${diagramId}`);
         if (guardado) {
           const parsed = JSON.parse(guardado);
-          if (parsed?.classes?.length) {
+          if (Array.isArray(parsed?.classes) && Array.isArray(parsed?.relations)) {
             const pTitle = (projectTitle || initialDiagram?.title || '').toLowerCase();
             const esHosp = pTitle.includes('hospit') || pTitle.includes('clíni') || pTitle.includes('clinic') || pTitle.includes('médic') || pTitle.includes('salud');
             const tieneProduct = parsed.classes.some((c: any) => c.name === 'ProductController' || c.name === 'Product');
@@ -433,6 +445,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   };
 
   const handleUndo = () => {
+    if(diagramId&&reviewRef.current.snapshot){void proposalsRef.current.restore('undo',reviewRef.current.snapshot.officialRevision).then(next=>{if(next)reviewRef.current.receive(next);});return;}
     if (undoStackRef.current.length === 0) {
       setSaveInfo({ tipo: 'ok', texto: 'No hay más acciones para deshacer' });
       return;
@@ -445,6 +458,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   };
 
   const handleRedo = () => {
+    if(diagramId&&reviewRef.current.snapshot){void proposalsRef.current.restore('redo',reviewRef.current.snapshot.officialRevision).then(next=>{if(next)reviewRef.current.receive(next);});return;}
     if (redoStackRef.current.length === 0) {
       setSaveInfo({ tipo: 'ok', texto: 'No hay más acciones para rehacer' });
       return;
@@ -614,6 +628,15 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   // ─────────────────────── CU-03 · Edición Colaborativa en Tiempo Real (STOMP) ───────────────────────
 
   const [estadoColab, setEstadoColab] = useState<'conectando' | 'conectado' | 'simulado'>('conectando');
+  const [roomReady,setRoomReady]=useState(!diagramId&&!urlRoomId);
+  useEffect(()=>{
+    if(!diagramId){setRoomReady(!urlRoomId);return;}
+    let live=true;setRoomReady(false);setEstadoColab('conectando');
+    void apiFetch<InformacionSesion>('/api/v1/colaboracion/salas/abrir',{method:'POST',body:JSON.stringify({diagramId,...(urlRoomId?{roomId:urlRoomId}:{})})}).then(session=>{
+      if(!live)return;setCurrentSession(session);localStorage.setItem('archai_session',JSON.stringify(session));setRoomReady(true);
+    }).catch(e=>{if(live)setSaveInfo({tipo:'error',texto:e instanceof Error?e.message:'No se pudo abrir la sala del proyecto.'});});
+    return()=>{live=false;};
+  },[diagramId,urlRoomId]);
   const [remoteCursors, setRemoteCursors] = useState<{ id: string; name: string; color: string; x: number; y: number }[]>([]);
   const [remoteDraggingNodes, setRemoteDraggingNodes] = useState<Record<string, { name: string; color: string }>>({});
   const timersRemoteDragRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -632,9 +655,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   );
   // CU-03: bandera para NO golpear la nube con guardados durante un arrastre en curso (solo al soltar)
   const arrastreEnCursoRef = useRef<boolean>(false);
-  const proposals = useProposals(currentSession, diagram, estadoColab === 'conectado',
+  const proposals = useProposals(currentSession, diagram, roomReady && estadoColab === 'conectado',
     (type, data) => stompRef.current?.publicar(type,data), `${currentSession.currentUser.id}#${miInstanciaIdRef.current}`, diagramId);
-  const review = useProposalReview(currentSession.roomId, diagramId, estadoColab === 'conectado', diagram, (next,previous) => {
+  const review = useProposalReview(currentSession.roomId, diagramId, roomReady && estadoColab === 'conectado', diagram, (next,previous) => {
     if(previous && serializeForDiff(previous)!==serializeForDiff(next)) {
       const top=undoStackRef.current[undoStackRef.current.length-1];
       if(!top || serializeForDiff(top)!==serializeForDiff(previous)) {
@@ -646,10 +669,49 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     diagramRef.current = next;
     setDiagram(next);
   });
+  const initialAiDock = initialDock === 'ai' || searchParams.get('dock') === 'ai';
+  useEffect(() => { if (initialAiDock) proposals.setOpen(true); }, [initialAiDock]);
   const reviewRef = useRef(review); reviewRef.current = review;
   const [connectionAttempt,setConnectionAttempt] = useState(0);
   const proposalsRef = useRef(proposals);
   proposalsRef.current = proposals;
+
+  // CU-05 · Al abrir un diagrama, restaura el contexto conversacional (chat, IA y propuestas)
+  // guardado junto al diagrama para que no se pierda nada al recargar.
+  useEffect(() => {
+    let activo = true;
+    if (!diagramId) return;
+    (async () => {
+      try {
+        const contexto = await obtenerContextoDiagrama(diagramId);
+        if (activo && contexto) {
+          proposalsRef.current.importarContexto(contexto);
+        }
+      } catch {
+        // Sin contexto previo: se inicia una conversación nueva.
+      }
+    })();
+    return () => { activo = false; };
+  }, [diagramId]);
+
+  // CU-03 · Al entrar a una sala colaborativa, restaura el contexto de esa sala (chat, IA, propuestas)
+  // para que cada sala conserve su propia conversación aislada.
+  useEffect(() => {
+    let activo = true;
+    const room = currentSession?.roomId;
+    if (!room || room === 'LOCAL-MODE') return;
+    (async () => {
+      try {
+        const contexto = await obtenerContextoSala(room);
+        if (activo && contexto) {
+          proposalsRef.current.importarContexto(contexto);
+        }
+      } catch {
+        // Sin contexto previo de sala: se inicia una conversación nueva en esta sala.
+      }
+    })();
+    return () => { activo = false; };
+  }, [currentSession?.roomId]);
 
   // Espejo del diagrama para comparar cambios sin reintroducir dependencias circulares
   useEffect(() => { diagramRef.current = diagram; }, [diagram]);
@@ -657,7 +719,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   // Conexión STOMP a la sala: suscribe /topic/collab/{salaId} y anuncia la llegada
   useEffect(() => {
     const habitacionId = currentSession.roomId;
-    if (!habitacionId) return;
+    if (!habitacionId || !roomReady) return;
     let activo = true;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -671,9 +733,11 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         if (!activo) return;
         const tipo = payload?.tipo;
         const emisorId = payload?.emisorId;
+        proposalsRef.current.receive(payload);
         if (tipo === 'ia_review_conflict') { reviewRef.current.setError(payload.payload?.message || 'El diagrama cambió. Revisa la versión actual.'); return; }
         if (tipo === 'ia_draft_state') { reviewRef.current.receive(payload.payload); return; }
-        if (tipo?.startsWith('ia_')) { proposalsRef.current.receive(payload); return; }
+        if(tipo==='ia_revision'){reviewRef.current.receiveRevision(payload.payload);return;}
+        if (tipo?.startsWith('ia_') || tipo?.startsWith('chat_')) return;
 
         // Ignorar únicamente ecos de esta misma pestaña
         if (emisorId === emisorIdInstancia && tipo !== 'diagrama') return;
@@ -777,7 +841,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           if (!datos || typeof datos !== 'object') return;
           try {
             const remoto = diagramaDesdeBackend(datos);
-            if (!remoto.classes || remoto.classes.length === 0) return;
+            if (!Array.isArray(remoto.classes)) return;
             setRemoteDraggingNodes({});
             esActualizacionRemotaRef.current = true;
             ultimaAplicacionRemotaRef.current = Date.now();
@@ -845,7 +909,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       stompRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSession.roomId, connectionAttempt]);
+  }, [currentSession.roomId, connectionAttempt,roomReady]);
 
   // Difunde los cambios locales del diagrama por STOMP con Trailing Debounce ultrarrápido (60ms)
   useEffect(() => {
@@ -934,6 +998,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     link.href = url;
     link.download = `${diagram.title.toLowerCase().replace(/\s+/g, '_')}_model.xmi`;
     link.click();
+    reportArtifact('xmi');
     URL.revokeObjectURL(url);
   };
 
@@ -946,6 +1011,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     link.href = url;
     link.download = `${diagram.title.toLowerCase().replace(/\s+/g, '_')}_enterprise_architect.xmi`;
     link.click();
+    reportArtifact('xmi');
     URL.revokeObjectURL(url);
     setSaveInfo({
       tipo: 'ok',
@@ -957,6 +1023,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const handleExportarArchivo = () => {
     try {
       exportProjectAsArchAi(diagram, diagram.title, currentSession?.currentUser?.name);
+      reportArtifact('native');
       setSaveInfo({
         tipo: 'ok',
         texto: `Proyecto '${diagram.title}' exportado en formato nativo .archai.json.`
@@ -1231,7 +1298,11 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const [showVersionesModal, setShowVersionesModal] = useState<boolean>(false);
   const [showPerfilModal, setShowPerfilModal] = useState<boolean>(false);
   const [versiones, setVersiones] = useState<any[]>([]);
-  const [guardadoEn, setGuardadoEn] = useState<string | null>(localStorage.getItem('archai_diagrama_id'));
+  const [guardadoEn, setGuardadoEn] = useState<string | null>(diagramId || null);
+  useEffect(() => {
+    setGuardadoEn(diagramId || null);
+    setVersiones([]);
+  }, [diagramId]);
   const [saveInfo, setSaveInfo] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
   const [online, setOnline] = useState<boolean>(typeof navigator === 'undefined' ? true : navigator.onLine);
   const [guardando, setGuardando] = useState<boolean>(false);
@@ -1240,7 +1311,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const [currentRole, setCurrentRole] = useState<RolEquipo>('Arquitecto de Software');
   const [userPermissions, setUserPermissions] = useState<PermisosUsuario>(() => obtenerPermisosRol('Arquitecto de Software'));
   const [isTeamModalOpen, setIsTeamModalOpen] = useState<boolean>(false);
-  const [customCodeMap, setCustomCodeMap] = useState<Record<string, string>>({});
 
   const [miembros, setMiembros] = useState<MiembroEquipo[]>([
     {
@@ -1302,6 +1372,22 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const maturityScore = useMemo(() => {
     return calcularMadurezProyecto(diagram).porcentajeGlobal;
   }, [diagram]);
+
+    const handleSendTeamChatMessage = (texto: string) => {
+    if (!texto.trim() || !stompRef.current?.estaConectado()) return;
+    const msg: TeamChatMessage = {
+      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      senderId: currentSession.currentUser.id,
+      sender: currentSession.currentUser.name,
+      senderRole: currentSession.currentUser.role || 'ARQUITECTO',
+      content: texto.trim(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      roomId: currentSession.roomId,
+      status: 'entregado',
+    };
+    setTeamChatMessages(prev => [...prev, msg]);
+    stompRef.current.publicar('chat', msg);
+  };
 
   const handleRoleChange = (newRole: RolEquipo) => {
     setCurrentRole(newRole);
@@ -1374,7 +1460,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const manejarGuardarEnNube = async () => {
     setGuardando(true);
     setSaveInfo(null);
-    const payload = construirPayloadDiagrama(diagram, { creadorId: currentSession.currentUser.id });
+    const payload = {...construirPayloadDiagrama(diagram, { creadorId: currentSession.currentUser.id }),...(diagramId?{id:diagramId}:{})};
     if (!online) {
       encolarOperacionOffline('guardar-diagrama', '/api/v1/diagramas', payload);
       setSaveInfo({ tipo: 'ok', texto: 'Sin conexión: el diagrama se encoló y se sincronizará automáticamente (CU-09).' });
@@ -1385,21 +1471,32 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       const guardado = await guardarDiagramaEnNube(diagram, undefined, currentSession.currentUser.id, diagramId);
       const id = guardado?.id;
       if (id) {
+        if(diagramId)await proposals.saveSession();
         setGuardadoEn(id);
         localStorage.setItem('archai_diagrama_id', id);
+        try {
+          const contexto = proposals.exportarContexto();
+          await guardarContextoDiagrama(id, contexto);
+          const room = currentSession?.roomId;
+          if (room && room !== 'LOCAL-MODE') {
+            await guardarContextoSala(room, contexto);
+          }
+        } catch {
+          // El diagrama se guardó; el contexto se intenta en el siguiente guardado.
+        }
         setSaveInfo({ tipo: 'ok', texto: `Diagrama guardado en la nube (id: ${id}).` });
       }
     } catch (err: any) {
-      encolarOperacionOffline('guardar-diagrama', '/api/v1/diagramas', payload);
-      setSaveInfo({ tipo: 'error', texto: `${err?.message || 'Error al guardar'}. Se encoló para sincronizar después.` });
+      const retryable = !('status' in err) || err.status === 0 || err.status >= 500;
+      if(retryable)encolarOperacionOffline('guardar-diagrama', '/api/v1/diagramas', payload);
+      setSaveInfo({ tipo: 'error', texto: `${err?.message || 'Error al guardar'}${retryable ? ' Se encoló para sincronizar después.' : ''}` });
     } finally {
       setGuardando(false);
     }
   };
 
   const handleSaveShortcut = () => {
-    manejarGuardarEnNube();
-    setSaveInfo({ tipo: 'ok', texto: 'Diagrama guardado en la nube y persistencia local (Ctrl+S)' });
+    void manejarGuardarEnNube();
   };
 
   // Atajos de teclado globales a nivel de ventana para el estudio ArchAI
@@ -1505,6 +1602,16 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       if (idDiagrama) {
         await crearVersion(idDiagrama, etiqueta.trim() || undefined as any, descripcion.trim(), currentSession.currentUser.id);
         await cargarVersiones();
+        try {
+          const contexto = proposals.exportarContexto();
+          await guardarContextoDiagrama(idDiagrama, contexto);
+          const room = currentSession?.roomId;
+          if (room && room !== 'LOCAL-MODE') {
+            await guardarContextoSala(room, contexto);
+          }
+        } catch {
+          // La versión se creó; el contexto se guarda en el próximo guardado explícito.
+        }
       }
     } catch (err: any) {
       setSaveInfo({ tipo: 'error', texto: err?.message || 'No se pudo crear la versión.' });
@@ -1589,6 +1696,12 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           onOpenQuickSearch={() => setIsQuickSearchOpen(true)}
           onToggleCodeDock={() => setIsCodeDockOpen(prev => !prev)}
           isCodeDockOpen={isCodeDockOpen}
+          onToggleTeamChat={() => {
+            setIsTeamChatOpen(prev => !prev);
+            setUnreadChatCount(0);
+          }}
+          isTeamChatOpen={isTeamChatOpen}
+          unreadChatCount={unreadChatCount}
           onShare={() => setShowShareModal(true)}
           onLogout={onLogout}
           onGuardarNube={() => setShowGuardarModal(true)}
@@ -1600,11 +1713,11 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           userRole={currentRole}
           onQuickRoleChange={handleRoleChange}
           onOpenTeamModal={() => setIsTeamModalOpen(true)}
-          onOpenMaturityAudit={() => setIsAiAssistantOpen(true)}
+          onOpenMaturityAudit={() => {proposals.setOpen(true);proposals.request("Realiza una auditoría del diagrama actual: explica sus riesgos y propón solo mejoras concretas para revisar.");}}
           onUndo={handleUndo}
           onRedo={handleRedo}
-          canUndo={canUndo}
-          canRedo={canRedo}
+          canUndo={review.snapshot?!!review.snapshot.canUndo:canUndo}
+          canRedo={review.snapshot?!!review.snapshot.canRedo:canRedo}
           onAbrirAtajos={() => setShowShortcutsModal(true)}
         />
 
@@ -1699,15 +1812,15 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             remoteDraggingNodes={remoteDraggingNodes}
             onDragStateChange={(enCurso) => { arrastreEnCursoRef.current = enCurso; }}
             onOpenWhiteboard={() => setShowWhiteboardModal(true)}
-            onToggleAiAssistant={() => setIsAiAssistantOpen(prev => !prev)}
-            isAiAssistantOpen={isAiAssistantOpen}
+            onToggleAiAssistant={() => proposals.setOpen(!proposals.open)}
+            isAiAssistantOpen={proposals.open}
             userPermissions={review.snapshot && !review.canModerate ? {...userPermissions,canEditDiagram:false,canConnectRelations:false} : userPermissions}
             userRole={currentRole}
             onAutoCompletarClase={handleAutoCompletarClase}
             onUndo={handleUndo}
             onRedo={handleRedo}
-            canUndo={canUndo}
-            canRedo={canRedo}
+            canUndo={review.snapshot?!!review.snapshot.canUndo:canUndo}
+            canRedo={review.snapshot?!!review.snapshot.canRedo:canRedo}
             onSaveShortcut={handleSaveShortcut}
             onOpenShortcutsModal={() => setShowShortcutsModal(true)}
             onCopyClass={handleCopyClass}
@@ -1730,29 +1843,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             onNotificar={(texto, tipo = 'ok') => setSaveInfo({ tipo, texto })}
           />
 
-          {/* Asesor colaborativo CU-15; conserva el asistente de comandos existente. */}
+          {/* Chat compartido: conversación, dictado y revisión de propuestas. */}
           <ProposalPanel state={proposals} host={currentSession.currentUser.isHost} review={review}/>
           <ProposalToolbar review={review} onInspect={()=>proposals.setOpen(true)}/>
-          {/* 5. Asistente de IA Flotante (NLP y Comandos por Voz) */}
-          {isAiAssistantOpen && (
-            <AsistenteIaFlotante
-              existingClasses={diagram.classes}
-              diagram={diagram}
-              customFiles={customCodeMap}
-              onAddClass={handleAddClass}
-              onAddAttribute={handleAddAttribute}
-              onAddMethod={handleAddMethod}
-              onAddRelation={handleAddRelation}
-              onUpdateDiagram={(d) => {
-                handleUpdateDiagram(d);
-                setSaveInfo({ tipo: 'ok', texto: `Diagrama actualizado por el agente IA: ${d.classes.length} clases, ${d.relations.length} relaciones.` });
-              }}
-              onOpenWhiteboard={() => setShowWhiteboardModal(true)}
-              onOpenCodeDock={() => setIsCodeDockOpen(true)}
-              onClose={() => setIsAiAssistantOpen(false)}
-            />
-          )}
-
           {/* 6. Panel Lateral de Generación de Código y DDL */}
           {isCodeDockOpen && (
             <Suspense fallback={null}>
@@ -1760,13 +1853,24 @@ export const StudioPage: React.FC<StudioPageProps> = ({
                 isOpen={isCodeDockOpen}
                 onClose={() => setIsCodeDockOpen(false)}
                 diagram={diagram}
-                onCustomCodeChange={setCustomCodeMap}
                 onImportarDiagrama={(d) => {
                   handleUpdateDiagram(d);
                   setSaveInfo({ tipo: 'ok', texto: 'Diagrama reconstruido desde XMI (CU-13).' });
                 }}
               />
             </Suspense>
+          )}
+
+          {/* Chat Colaborativo en Vivo con el Equipo Móvil y Anfitrión */}
+          {isTeamChatOpen && (
+            <TeamChatDock
+              isOpen={isTeamChatOpen}
+              onClose={() => setIsTeamChatOpen(false)}
+              messages={teamChatMessages}
+              onSendMessage={handleSendTeamChatMessage}
+              currentUser={currentSession.currentUser}
+              roomId={currentSession.roomId}
+            />
           )}
             </>
           )}
@@ -2190,7 +2294,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             onExportEA={handleExportarEA}
             onToggleTheme={handleToggleTheme}
             onOpenShortcuts={() => setShowShortcutsModal(true)}
-            onToggleAiAssistant={() => setIsAiAssistantOpen(prev => !prev)}
+            onToggleAiAssistant={() => proposals.setOpen(!proposals.open)}
             onToggleCodeDock={() => setIsCodeDockOpen(prev => !prev)}
             onOpenTeamModal={() => setIsTeamModalOpen(true)}
             onOpenVersions={manejarAbrirVersiones}

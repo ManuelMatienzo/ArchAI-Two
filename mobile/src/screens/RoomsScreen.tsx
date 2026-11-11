@@ -1,3 +1,5 @@
+import { disablePush } from '../services/notificationsService';
+import { mobileStomp } from '../api/stompClient';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -11,6 +13,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Radio, Folder } from 'lucide-react-native';
 import { colors } from '../theme/colors';
+import { conversationApi } from '../api/conversationApi';
 import { roomsApi, RoomItem, ProjectItem } from '../api/roomsApi';
 import {
   desactivarNotificacionesPush,
@@ -50,6 +53,9 @@ export const RoomsScreen = ({ navigation }: any) => {
   const [joinRoomErrorMessage, setJoinRoomErrorMessage] = useState<string | null>(null);
   const [createRoomErrorMessage, setCreateRoomErrorMessage] = useState<string | null>(null);
 
+  // Salas que este usuario ha entrado (registro local para aislamiento por cuenta)
+  const [joinedRooms, setJoinedRooms] = useState<Set<string>>(new Set());
+
   // Estado de Proyectos Segregados por Usuario (CU-02)
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
@@ -65,13 +71,26 @@ export const RoomsScreen = ({ navigation }: any) => {
     try {
       const activeRooms = await roomsApi.listActiveRooms(userId || undefined);
       setRooms(activeRooms);
+      // El backend ya filtra por propietario/participante: estas son las salas del usuario.
+      if (activeRooms.length > 0) {
+        const ids = activeRooms.map((r) => r.id);
+        setJoinedRooms((prev) => {
+          const next = new Set(prev);
+          ids.forEach((id) => next.add(id));
+          return next;
+        });
+        void AsyncStorage.setItem(
+          `archai_rooms_joined_${userId}`,
+          JSON.stringify([...new Set([...Array.from(joinedRooms), ...ids])])
+        );
+      }
     } catch {
       // Fallback silencioso
     } finally {
       setIsLoadingRooms(false);
       setIsRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, joinedRooms]);
 
   // Consulta de proyectos pertenecientes al usuario autenticado (CU-02: solo creados o integrados)
   const fetchUserProjects = useCallback(async () => {
@@ -112,6 +131,23 @@ export const RoomsScreen = ({ navigation }: any) => {
     };
   }, []);
 
+  // Carga el registro local de salas que este usuario ha entrado (aislamiento por cuenta)
+  useEffect(() => {
+    if (!userId) return;
+    let mounted = true;
+    AsyncStorage.getItem(`archai_rooms_joined_${userId}`)
+      .then((raw) => {
+        if (!mounted) return;
+        if (raw) {
+          try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) setJoinedRooms(new Set(arr));
+          } catch {}
+        }
+      });
+    return () => { mounted = false; };
+  }, [userId]);
+
   // Cargar datos cuando la identidad esté lista
   useEffect(() => {
     if (!isSessionReady) return;
@@ -145,15 +181,20 @@ export const RoomsScreen = ({ navigation }: any) => {
 
   // Filtrado reactivo de salas por nombre o código PIN
   const filteredRooms = useMemo(() => {
-    if (!searchQuery.trim()) return rooms;
+    let result = rooms;
+    // Solo mostrar salas que este usuario ha entrado (o es propietario)
+    if (joinedRooms.size > 0) {
+      result = result.filter((r) => joinedRooms.has(r.id));
+    }
+    if (!searchQuery.trim()) return result;
     const q = searchQuery.toLowerCase().trim();
-    return rooms.filter(
+    return result.filter(
       (r) =>
         r.id.toLowerCase().includes(q) ||
         r.name.toLowerCase().includes(q) ||
         (r.projectCode && r.projectCode.toLowerCase().includes(q))
     );
-  }, [rooms, searchQuery]);
+  }, [rooms, searchQuery, joinedRooms]);
 
   // Unirse a un proyecto compartido por su código de acceso (CU-02)
   const handleJoinProjectByCode = async () => {
@@ -182,13 +223,22 @@ export const RoomsScreen = ({ navigation }: any) => {
   };
 
   // Selección de proyecto: abre el visor de canvas pasando projectId para cargar su diagrama
-  const handleSelectProject = (project: ProjectItem) => {
-    vincularSalaPush({ id: userId, name: userName }, project.codigoAcceso, project.id).catch(() => {});
-    navigation.navigate('CanvasViewer', {
-      roomId: project.codigoAcceso,
-      roomName: project.nombre,
-      projectId: project.id,
-    });
+  const handleSelectProject = async (project: ProjectItem) => {
+    try {
+      const session = await conversationApi.resolve(undefined, project.id);
+      navigation.navigate('CanvasViewer', {
+        roomId: session.roomId,
+        roomName: session.roomName,
+        projectId: project.id,
+        diagramId: session.diagramId,
+      });
+    } catch (e) {
+      navigation.navigate('CanvasViewer', {
+        roomId: project.codigoAcceso,
+        roomName: project.nombre,
+        projectId: project.id,
+      });
+    }
   };
 
   // Unirse a sala por PIN
@@ -211,7 +261,7 @@ export const RoomsScreen = ({ navigation }: any) => {
       vincularSalaPush({ id: userId, name: userName }, session.roomId || finalPin).catch(() => {});
       navigation.navigate('CanvasViewer', {
         roomId: session.roomId || finalPin,
-        roomName: session.roomName || `Sala ${finalPin}`,
+        roomName: session.roomName || `Sala ${finalPin}`,diagramId:session.diagramId,projectId:session.projectId,
       });
     } catch (err: any) {
       setJoinRoomErrorMessage(err.message || 'No se pudo conectar con la sala. Verifica el PIN.');
@@ -261,8 +311,8 @@ export const RoomsScreen = ({ navigation }: any) => {
   };
 
   const handleLogout = async () => {
-    // CU-23 — Evita que el dispositivo siga recibiendo alertas del usuario que sale.
-    await desactivarNotificacionesPush().catch(() => {});
+    await Promise.allSettled([disablePush(), desactivarNotificacionesPush()]);
+    mobileStomp.disconnect();
     await AsyncStorage.removeItem('archai_session');
     await AsyncStorage.removeItem('archai_jwt_token');
     navigation.replace('Login');

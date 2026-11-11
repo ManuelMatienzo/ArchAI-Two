@@ -4,6 +4,7 @@ import mkcert from 'vite-plugin-mkcert'
 import { geminiEnvConfig } from './geminiEnvConfig.mjs'
 
 export default defineConfig(({ mode }) => ({
+  envPrefix: ['VITE_ARCHAI_'],
   define: geminiEnvConfig(mode),
   plugins: [
     react(),

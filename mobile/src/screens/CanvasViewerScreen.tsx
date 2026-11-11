@@ -409,8 +409,8 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
     // 0. Carga instantánea desde caché L1 (memoria) o L2 (almacenamiento) para 0 ms jank
     diagramCacheService.getCachedDiagram(cacheKey).then((cached) => {
       if (isMounted && cached && Array.isArray(cached.classes) && cached.classes.length > 0) {
-        const { classes: normClasses, offsetX, offsetY } = normalizeDiagramCoordinates(cached.classes);
-        diagramOffsetRef.current = { x: offsetX, y: offsetY };
+        const { classes: normClasses } = normalizeDiagramCoordinates(cached.classes);
+        diagramOffsetRef.current = { x: 0, y: 0 };
         setClasses(normClasses);
         setRelationships(Array.isArray(cached.relationships) ? cached.relationships : []);
         setIsLoadingDiagram(false);
@@ -431,8 +431,8 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
       const loadedClasses = Array.isArray(diagram?.classes) ? diagram.classes : [];
       const loadedRels = Array.isArray(diagram?.relationships) ? diagram.relationships : [];
 
-      const { classes: normClasses, offsetX, offsetY } = normalizeDiagramCoordinates(loadedClasses);
-      diagramOffsetRef.current = { x: offsetX, y: offsetY };
+      const { classes: normClasses } = normalizeDiagramCoordinates(loadedClasses);
+      diagramOffsetRef.current = { x: 0, y: 0 };
       setClasses(normClasses);
       setRelationships(loadedRels);
       setIsLoadingDiagram(false);
@@ -576,8 +576,8 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
             const senderName = msg.emisorNombre || payload.emisorNombre || 'Colaborador';
 
             if (classId && typeof rawX === 'number' && typeof rawY === 'number') {
-              const x = Math.round(rawX + diagramOffsetRef.current.x);
-              const y = Math.round(rawY + diagramOffsetRef.current.y);
+              const x = Math.round(rawX);
+              const y = Math.round(rawY);
 
               // Indicador visual de quién está moviendo la tabla en la Web
               setRemoteDraggingNodes((prev) => ({
@@ -610,8 +610,8 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
               const diagramData = payload.diagram || payload;
               const parsed = parseBackendDiagram(diagramData);
               if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
-                const { classes: normClasses, offsetX, offsetY } = normalizeDiagramCoordinates(parsed.classes);
-                diagramOffsetRef.current = { x: offsetX, y: offsetY };
+                const { classes: normClasses } = normalizeDiagramCoordinates(parsed.classes);
+                diagramOffsetRef.current = { x: 0, y: 0 };
                 setRemoteDraggingNodes({});
                 setClasses(normClasses);
                 setRelationships(parsed.relationships);

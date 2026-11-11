@@ -19,6 +19,7 @@ interface AppRoutesProps {
   selectedDiagram?: any;
   selectedProjectTitle?: string;
   selectedDiagramId?: string;
+  selectedRoomId?: string;
 }
 
 /**
@@ -65,7 +66,8 @@ export const AppRoutes: React.FC<AppRoutesProps> = ({
   onBackToProjects,
   selectedDiagram,
   selectedProjectTitle,
-  selectedDiagramId
+  selectedDiagramId,
+  selectedRoomId
 }) => {
   // Elemento reutilizable de Login con carga perezosa
   const loginElement = (
@@ -99,6 +101,7 @@ export const AppRoutes: React.FC<AppRoutesProps> = ({
           initialDiagram={selectedDiagram}
           projectTitle={selectedProjectTitle}
           diagramId={selectedDiagramId}
+          roomId={selectedRoomId}
           onOpenProjects={onBackToProjects}
           initialTab={initialTab}
           initialDock={initialDock}
