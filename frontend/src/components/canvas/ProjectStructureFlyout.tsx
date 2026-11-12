@@ -8,7 +8,6 @@ import {
   Box, 
   Database,
   Minimize2,
-  Maximize2,
   Plus,
   RefreshCw,
   Folder,
@@ -24,6 +23,8 @@ import {
 } from '../../services/api';
 
 interface ProjectStructureFlyoutProps {
+  isOpen: boolean;
+  onClose: () => void;
   classes: ClaseUml[];
   onSelectClass?: (classId: string) => void;
   selectedClassId?: string | null;
@@ -39,6 +40,8 @@ interface ProjectStructureFlyoutProps {
 }
 
 export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
+  isOpen,
+  onClose,
   classes,
   onSelectClass,
   selectedClassId,
@@ -48,7 +51,6 @@ export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
   onMouseEnterPanel,
   onMouseLeavePanel
 }) => {
-  const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'structure' | 'xmi' | 'proyectos'>('structure');
   const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
     domain: true,
@@ -141,20 +143,17 @@ export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
         position: 'absolute',
         top: '16px',
         left: '16px',
-        width: isExpanded ? '260px' : '44px',
-        height: isExpanded ? 'auto' : '44px',
+        width: '260px',
         maxHeight: 'calc(100% - 100px)',
         background: 'var(--glass-flyout-bg)',
         backdropFilter: 'var(--glass-blur-lg)',
         WebkitBackdropFilter: 'var(--glass-blur-lg)',
         border: '1px solid var(--glass-flyout-border)',
         borderRadius: '16px',
-        boxShadow: isExpanded
-          ? '0 24px 70px -12px rgba(0, 0, 20, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04)'
-          : 'var(--glass-topbar-shadow)',
+        boxShadow: '0 24px 70px -12px rgba(0, 0, 20, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04)',
         // Cajón: al expandirse se eleva sobre la Toolbox (z-index 40 > 35) y la tapa temporalmente.
-        zIndex: isExpanded ? 40 : 25,
-        display: 'flex',
+        zIndex: 40,
+        display: isOpen ? 'flex' : 'none',
         flexDirection: 'column',
         overflow: 'hidden',
         transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -163,35 +162,32 @@ export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
     >
       {/* Header bar */}
       <div
-        onClick={() => { if (!isExpanded) setIsExpanded(true); }}
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 12px',
-          borderBottom: isExpanded ? '1px solid var(--glass-flyout-border)' : 'none',
+          borderBottom: '1px solid var(--glass-flyout-border)',
           background: 'rgba(125, 125, 125, 0.04)',
-          cursor: isExpanded ? 'default' : 'pointer'
+          cursor: 'default'
         }}
-        title={isExpanded ? undefined : 'Click para ver estructura del proyecto'}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <FolderTree size={16} color="var(--accent-cyan)" />
-          {isExpanded && (
-            <span style={{
-              fontFamily: 'var(--font-heading)',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              color: 'var(--text-primary)',
-              letterSpacing: '0.01em'
-            }}>
-              Estructura del Proyecto
-            </span>
-          )}
+          <span style={{
+            fontFamily: 'var(--font-heading)',
+            fontSize: '0.82rem',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            letterSpacing: '0.01em'
+          }}>
+            Estructura del Proyecto
+          </span>
         </div>
 
         <button
-          onClick={() => setIsExpanded(!isExpanded)}
+          type="button"
+          onClick={onClose}
           style={{
             background: 'transparent',
             border: 'none',
@@ -203,13 +199,13 @@ export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
             justifyContent: 'center',
             borderRadius: '4px'
           }}
-          title={isExpanded ? 'Minimizar estructura' : 'Expandir estructura'}
+          title="Minimizar estructura"
         >
-          {isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          <Minimize2 size={13} />
         </button>
       </div>
 
-      {isExpanded && (
+      {isOpen && (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           {/* Tab Pill Switcher */}
           <div style={{

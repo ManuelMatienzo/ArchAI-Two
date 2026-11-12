@@ -6,6 +6,7 @@ import {
   Boxes,
   LogOut,
   FolderKanban,
+  FolderTree,
   Bot
 } from 'lucide-react';
 import { PerfilUsuario } from '../../types/auth';
@@ -19,6 +20,8 @@ export interface LeftNavRailProps {
   onLogout?: () => void;
   onOpenProjects?: () => void;
   onOpenStudio?: () => void;
+  onToggleProjectStructure?: () => void;
+  projectStructureOpen?: boolean;
   onToggleAssistant?: () => void;
   assistantOpen?: boolean;
 }
@@ -30,6 +33,8 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
   onLogout,
   onOpenProjects,
   onOpenStudio,
+  onToggleProjectStructure,
+  projectStructureOpen = false,
   onToggleAssistant,
   assistantOpen = false
 }) => {
@@ -153,6 +158,32 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
         >
           <LayoutGrid size={18} />
         </button>
+
+        {onToggleProjectStructure && (
+          <button
+            type="button"
+            onClick={onToggleProjectStructure}
+            title="Estructura del Proyecto"
+            aria-label="Estructura del Proyecto"
+            aria-expanded={projectStructureOpen}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              border: projectStructureOpen ? '1px solid color-mix(in srgb, var(--glass-accent) 55%, transparent)' : '1px solid transparent',
+              background: projectStructureOpen ? 'color-mix(in srgb, var(--glass-accent) 22%, transparent)' : 'transparent',
+              color: projectStructureOpen ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              boxShadow: projectStructureOpen ? '0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)' : 'none'
+            }}
+          >
+            <FolderTree size={18} />
+          </button>
+        )}
 
         {/* Equipo y Colaboradores */}
         <button

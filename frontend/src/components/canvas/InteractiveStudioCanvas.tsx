@@ -168,7 +168,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const [isDockCollapsed, setIsDockCollapsed] = useState<boolean>(false);
 
   // Estado de la Toolbox UML 2.5+ (desplegada / minimizada)
-  const [isToolboxOpen, setIsToolboxOpen] = useState<boolean>(true);
+  const [isToolboxOpen, setIsToolboxOpen] = useState<boolean>(false);
   const [insertStaggerCount, setInsertStaggerCount] = useState<number>(0);
 
   // Modales asistidos para modelado manual acelerado
@@ -4358,6 +4358,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           {/* BotÃ³n de Acceso Directo a Toolbox UML 2.5+ */}
           <button
             onClick={() => setIsToolboxOpen(prev => !prev)}
+            aria-expanded={isToolboxOpen}
             className="btn-studio-glass dock-btn"
             style={{
               padding: '6px 12px',

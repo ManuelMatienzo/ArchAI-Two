@@ -5,6 +5,7 @@ import { LeftNavRail as BarraLateralNavegacion } from '../../components/layout/L
 import { TopHeader as BarraSuperior } from '../../components/layout/TopHeader';
 import { ProjectStructureFlyout as PanelEstructuraProyecto } from '../../components/canvas/ProjectStructureFlyout';
 import { InteractiveStudioCanvas as LienzoInteractivoStudio } from '../../components/canvas/InteractiveStudioCanvas';
+import { StudioSettings } from './StudioSettings';
 import { TeamChatDock, TeamChatMessage } from '../../components/collaboration/TeamChatDock';
 import { CollaborationPanel as PanelColaboracion } from '../../components/collaboration/CollaborationPanel';
 import { RolEquipo, PermisosUsuario, MiembroEquipo, obtenerPermisosRol } from '../../types/rbac';
@@ -67,7 +68,7 @@ import {
   obtenerColaOffline
 } from '../../services/api';
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
-import { Share2, Copy, Check, X, Save, History, UserCircle, CloudOff, RotateCcw, Upload, Settings2, RefreshCw, Users, UserCheck, Sun, Moon, Zap, Radio, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Share2, Copy, Check, X, Save, History, UserCircle, CloudOff, RotateCcw, Upload, RefreshCw, Users, UserCheck, Zap, Radio, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { GlassModal } from '../../components/glass/GlassModal';
 
 export interface StudioPageProps {
@@ -321,6 +322,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     if (tabParam === 'team' || tabParam === 'settings' || tabParam === 'canvas') return tabParam;
     return 'canvas';
   });
+  const [isProjectStructureOpen, setIsProjectStructureOpen] = useState(false);
   const [isTeamChatOpen, setIsTeamChatOpen] = useState<boolean>(false);
   const [teamChatMessages, setTeamChatMessages] = useState<TeamChatMessage[]>([]);
   const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
@@ -1279,6 +1281,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
 
   const handleSelectRailTab = (tab: 'canvas' | 'team' | 'settings') => {
     setActiveRailTab(tab);
+    if (tab !== 'canvas') setIsProjectStructureOpen(false);
     const newParams = new URLSearchParams(location.search);
     if (tab === 'canvas') {
       newParams.delete('tab');
@@ -1664,6 +1667,11 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       {/* 1. Barra Lateral de Navegación */}
       <BarraLateralNavegacion
         activeTab={activeRailTab}
+        projectStructureOpen={activeRailTab === 'canvas' && isProjectStructureOpen}
+        onToggleProjectStructure={() => {
+          if (activeRailTab !== 'canvas') handleSelectRailTab('canvas');
+          setIsProjectStructureOpen(open => activeRailTab !== 'canvas' || !open);
+        }}
         assistantOpen={proposals.open}
         onToggleAssistant={() => {setActiveRailTab('canvas');proposals.setOpen(!proposals.open);}}
         onSelectTab={handleSelectRailTab}
@@ -1832,6 +1840,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
 
           {/* 3. Panel Flotante de Estructura del Proyecto */}
           <PanelEstructuraProyecto
+            isOpen={isProjectStructureOpen}
+            onClose={() => setIsProjectStructureOpen(false)}
             classes={diagram.classes}
             selectedClassId={selectedClassId}
             onSelectClass={setSelectedClassId}
@@ -1912,61 +1922,17 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             </div>
           )}
 
-          {/* 8. Configuración del Estudio (tema, offline, datos de sesión) */}
           {activeRailTab === 'settings' && (
-            <div style={{ position: 'absolute', inset: 0, zIndex: 28, overflowY: 'auto', padding: '20px', display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start' }}>
-              <div className="glass-card" style={{ width: '390px', maxWidth: '100%', padding: '20px 24px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                  <Settings2 size={18} color="var(--accent-primary)" />
-                  <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                    Configuración del Estudio
-                  </h3>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '0.82rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Tema visual</span>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button onClick={() => setTheme('light')} className="btn-studio-glass" style={{ padding: '4px 12px', fontSize: '0.72rem', fontWeight: 700, opacity: theme === 'light' ? 1 : 0.6 }}>
-                        <Sun size={12} color="var(--accent-primary)" style={{ flexShrink: 0 }} /> Claro
-                      </button>
-                      <button onClick={() => setTheme('dark')} className="btn-studio-glass" style={{ padding: '4px 12px', fontSize: '0.72rem', fontWeight: 700, opacity: theme === 'dark' ? 1 : 0.6 }}>
-                        <Moon size={12} color="#38bdf8" style={{ flexShrink: 0 }} /> Oscuro
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Cola offline (CU-09)</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.74rem', fontWeight: 700, color: obtenerColaOffline().length > 0 ? '#e8c39e' : 'var(--accent-emerald)' }}>
-                      {obtenerColaOffline().length} pendiente(s)
-                    </span>
-                  </div>
-                  <button
-                    onClick={manejarSincronizarCola}
-                    className="btn-studio-primary"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.78rem' }}
-                  >
-                    <RefreshCw size={14} /> Sincronizar cola offline
-                  </button>
-
-                  <div style={{ borderTop: '1px solid var(--glass-border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem', fontWeight: 700, textTransform: 'uppercase' }}>Sesión actual</div>
-                    <div>
-                      <UserCircle size={13} color="var(--accent-primary)" style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                      <strong>{currentSession.currentUser.name}</strong> · {currentSession.currentUser.role}
-                    </div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.74rem', color: 'var(--text-muted)' }}>PIN de sala: {currentSession.roomId}</div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                      Colaboración: {estadoColab === 'conectado' ? 'STOMP en vivo' : estadoColab === 'conectando' ? 'conectando…' : 'local'}
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', marginTop: '4px' }}>
-                      ArchAI CASE v1.0 · Spring Boot 3 · React 18 · XMI UML 2.5
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <StudioSettings
+              key={currentSession.roomId}
+              session={currentSession}
+              theme={theme}
+              onThemeChange={setTheme}
+              pendingChanges={obtenerColaOffline().length}
+              onSync={manejarSincronizarCola}
+              state={proposals}
+              review={review}
+            />
           )}
         </div>
       </div>

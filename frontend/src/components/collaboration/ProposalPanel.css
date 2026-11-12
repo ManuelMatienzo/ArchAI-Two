@@ -12,19 +12,11 @@
 }
 .proposal-panel { position: absolute; left: 16px; top: 16px; bottom: 84px; width: 370px; max-width: calc(100% - 32px); z-index: 43; display: flex; flex-direction: column; overflow: hidden; }
 .proposal-panel *, .proposal-notice * { box-sizing: border-box; }
-.proposal-header { display: flex; align-items: center; gap: 11px; padding: 18px 20px; border-bottom: 1px solid var(--glass-border-color); }
+.proposal-header { display: flex; align-items: center; gap: 11px; padding: 12px 20px; border-bottom: 1px solid var(--glass-border-color); }
 .proposal-avatar { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid var(--glass-ai-icon-border); border-radius: 11px; background: var(--glass-ai-icon-bg); color: var(--glass-ai-icon-color); }
 .proposal-heading { flex: 1; }
 .proposal-heading h3 { margin: 0; font: 800 18px var(--font-heading); letter-spacing: -.02em; }
-.proposal-heading span { font-size: 11px; color: var(--text-muted); }
 .proposal-close { padding: 7px !important; border-radius: 8px; }
-.proposal-preferences { padding: 12px 20px; border-bottom: 1px solid var(--glass-border-color); color: var(--text-secondary); }
-.proposal-preferences > summary { cursor: pointer; list-style: none; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
-.proposal-preferences > summary::-webkit-details-marker { display: none; }
-.proposal-preferences[open] > summary svg { transform: rotate(90deg); }
-.proposal-setting { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 13px; }
-.proposal-setting span { font-size: 11px; font-weight: 700; color: var(--text-primary); }
-.proposal-setting small { display: block; font-size: 10px; color: var(--text-muted); font-weight: 400; }
 .proposal-switch { width: 32px; height: 19px; padding: 2px; flex-shrink: 0; border: 1px solid var(--glass-border-color); background: var(--glass-surface); border-radius: 99px; cursor: pointer; transition: background .2s; }
 .proposal-switch span { display: block; width: 13px; height: 13px; background: var(--text-muted); border-radius: 50%; transition: transform .2s; }
 .proposal-switch[aria-checked="true"] { background: var(--glass-accent); }
@@ -80,21 +72,8 @@
   .proposal-prompt { padding: 7px 10px; }
 }
 
-.proposal-header, .proposal-preferences, .proposal-composer { flex-shrink: 0; }
-.proposal-preferences { max-height: 42%; overflow-y: auto; }
-.proposal-preferences[open] { flex: 1; min-height: 0; max-height: none; }
-.proposal-preferences[open] + .proposal-conversation.is-empty { display: none; }
-.proposal-local-model { padding: 13px 0 12px; margin-bottom: 2px; border-bottom: 1px solid var(--glass-border-color); }
-.proposal-local-model label { display: flex; align-items: center; gap: 7px; color: var(--text-primary); font-size: 11px; font-weight: 700; }
-.proposal-local-model p, .proposal-local-model small { display: block; font-size: 10px; line-height: 1.6; color: var(--text-muted); margin: 5px 0 0; }
-.proposal-model-controls { display: flex; gap: 7px; margin: 9px 0; }
-.proposal-model-controls select { flex: 1; min-width: 0; border: 1px solid var(--glass-ai-input-border); background: var(--glass-ai-input-bg); color: var(--glass-ai-input-text); border-radius: 8px; padding: 8px; font: 500 10px var(--font-body); outline-offset: 2px; }
-.proposal-model-controls option { background: var(--bg-app); color: var(--text-primary); }
-.proposal-model-controls button { padding: 7px 9px; font-size: 10px; flex-shrink: 0; }
+.proposal-header, .proposal-composer { flex-shrink: 0; }
 .proposal-response-model { display: block; margin-top: 4px; color: var(--text-muted); font: 400 9px/1.6 var(--font-mono); overflow-wrap: anywhere; }
-.proposal-engine { padding: 12px 0; border-bottom: 1px solid var(--glass-border-color); }
-.proposal-engine > span { font-size: 11px; font-weight: 700; color: var(--text-primary); }
-.proposal-engine small { display: block; margin-top: 7px; font-size: 10px; line-height: 1.6; color: var(--text-muted); }
 .proposal-engine-options { display: flex; gap: 3px; padding: 3px; margin-top: 8px; border: 1px solid var(--glass-ai-input-border); border-radius: 10px; background: var(--glass-ai-input-bg); }
 .proposal-engine-options button { display: flex; justify-content: center; align-items: center; gap: 7px; flex: 1; padding: 7px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-muted); font: 600 11px var(--font-body); cursor: pointer; }
 .proposal-engine-options button[aria-pressed="true"] { background: var(--glass-ai-chip-bg); border-color: var(--glass-ai-chip-border); color: var(--glass-ai-chip-text); }
@@ -139,12 +118,10 @@
 
 .proposal-review-tabs { margin: 10px 18px; flex-shrink: 0; }
 .proposal-panel.is-reviewing .proposal-review { flex: 1; max-height: none; border-top: 0; }
-.proposal-panel.is-reviewing .proposal-preferences[open] { flex: 0 1 auto; max-height: 32%; }
 
 .proposal-member-editor { flex-wrap: wrap; }
 .proposal-member-editor input:not(.proposal-method-params) { flex: 1; width: 60px; }
 .proposal-member-editor .proposal-method-params { flex-basis: 100%; }
-.room-chat-panel .proposal-preferences[open] { flex: 0 1 auto; max-height: 45%; }
 .room-chat-panel .proposal-review { flex: 1; min-height: 0; overflow-y: auto; }
 .chat-message { padding: 12px; margin: 0 0 12px; border: 1px solid var(--glass-border-color); background: var(--glass-surface); border-radius: 12px; overflow-wrap: anywhere; }
 .chat-message.is-mine { margin-left: 16px; border-radius: 12px 12px 4px 12px; background: color-mix(in srgb, var(--glass-accent) 7%, var(--glass-surface)); }
@@ -174,9 +151,6 @@
 .chat-proposal-card > small { color: var(--text-muted); font-size: 10px; }
 .chat-proposal-card > button { align-self: flex-start; margin-top: 5px; }
 .chat-message-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 7px; font-size: 9px; }
-.chat-members { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
-.chat-members > span { border: 1px solid var(--glass-border-color); padding: 2px 6px; border-radius: 99px; font-size: 10px; }
-.chat-sync-warning { display: block; margin-top: 8px; font-size: 10px; color: var(--accent-primary); }
 .chat-mention { border: 0; background: var(--glass-ai-chip-bg); border-radius: 5px; color: var(--glass-ai-chip-text); padding: 3px 6px; font: inherit; font-size: 10px; cursor: pointer; }
 .chat-load-older { display: block; margin: 0 auto 12px; }
 .proposal-selection .chat-deletion { border-color: color-mix(in srgb, #ef4444 45%, var(--glass-border-color)); }

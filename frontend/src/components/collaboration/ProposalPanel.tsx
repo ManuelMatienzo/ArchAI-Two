@@ -4,13 +4,6 @@ import {
   Send,
   X,
   ChevronRight,
-  Cpu,
-  RefreshCw,
-  Cloud,
-  Users,
-  Save,
-  History,
-  Eye,
   MessageSquare,
   Mic,
   Square,
@@ -83,6 +76,8 @@ export function useProposals(
   } | null>(null);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [sessionNotice, setSessionNotice] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+  const [historyNotice, setHistoryNotice] = useState('');
   const current = useRef({ session, diagram, diagramId, connected, open, messages, settings });
   current.current = { session, diagram, diagramId, connected, open, messages, settings };
   const generation = useRef(0),
@@ -140,6 +135,9 @@ export function useProposals(
     setMessages([]);
     setSettings(defaultSettings);
     setCheckpoints([]);
+    setSessionNotice('');
+    setSettingsError('');
+    setHistoryNotice('');
     setNotice(null);
     setUnread(0);
     setError('');
@@ -255,7 +253,7 @@ export function useProposals(
   };
   const configure = async (value: Partial<Pick<RoomSettings, 'mode' | 'model' | 'observing'>>) => {
     try {
-      setError('');
+      setSettingsError('');
       applySettings(
         await apiFetch<RoomSettings>(path('/configuracion'), {
           method: 'PUT',
@@ -263,7 +261,7 @@ export function useProposals(
         })
       );
     } catch (e) {
-      setError(friendly(e));
+      setSettingsError(friendly(e));
     }
   };
   const checkModel = async () => {
@@ -272,7 +270,7 @@ export function useProposals(
     try {
       const list = await apiFetch<string[]>(path('/modelos-locales'));
       setLocalModels(list);
-      if (!list.length && settings.mode === 'local') setModelError('No se encontraron modelos locales.');
+      if (!list.length) setModelError('No se encontraron modelos locales.');
     } catch (e) {
       setModelError(friendly(e));
     } finally {
@@ -285,7 +283,7 @@ export function useProposals(
       if (!first) return;
       const older = await apiFetch<RoomMessage[]>(`${path('/mensajes')}&before=${first.sequence}&limit=100`);
       upsert(older);
-      if (!older.length) setSessionNotice('Has llegado al inicio de la conversación.');
+      setHistoryNotice(older.length ? '' : 'Has llegado al inicio de la conversación.');
     } catch (e) {
       setError(friendly(e));
     }
@@ -354,14 +352,16 @@ export function useProposals(
   };
   const loadCheckpoints = async () => {
     try {
+      setSettingsError('');
       setCheckpoints(await apiFetch<Checkpoint[]>(path('/sesion/puntos-control')));
     } catch (e) {
-      setError(friendly(e));
+      setSettingsError(friendly(e));
     }
   };
   const saveSession = async () => {
     try {
-      setError('');
+      setSettingsError('');
+      setSessionNotice('');
       await apiFetch(path('/sesion/guardar'), {
         method: 'POST',
         body: JSON.stringify({ official: current.current.diagram }),
@@ -370,7 +370,7 @@ export function useProposals(
       await loadCheckpoints();
       await refresh();
     } catch (e) {
-      setError(friendly(e));
+      setSettingsError(friendly(e));
     }
   };
   const restore = async (
@@ -378,16 +378,18 @@ export function useProposals(
     expectedRevision: number,
     checkpointId?: string
   ) => {
+    const reportError = action === 'restore' ? setSettingsError : setError;
     try {
-      setError('');
+      reportError('');
       const next = await apiFetch<any>(path('/sesion/restaurar'), {
         method: 'POST',
         body: JSON.stringify({ action, checkpointId, expectedRevision, operationId: crypto.randomUUID() }),
       });
+      if (action === 'restore') setSessionNotice('Punto de control restaurado.');
       await refresh();
       return next;
     } catch (e) {
-      setError(friendly(e));
+      reportError(friendly(e));
       return undefined;
     }
   };
@@ -436,6 +438,8 @@ export function useProposals(
     saveSession,
     restore,
     sessionNotice,
+    settingsError,
+    historyNotice,
     loadOlder,
     cancel,
     retry,
@@ -455,8 +459,7 @@ export function ProposalPanel({
   review: ProposalReview;
 }) {
   const [text, setText] = useState(''),
-    [reviewMode, setReviewMode] = useState(false),
-    [checkpoint, setCheckpoint] = useState('');
+    [reviewMode, setReviewMode] = useState(false);
   const [listening, setListening] = useState(false),
     [voiceError, setVoiceError] = useState('');
   const recognition = useRef<{ stop: () => void } | null>(null);
@@ -532,7 +535,6 @@ export function ProposalPanel({
             </div>
             <div className="proposal-heading">
               <h3>Equipo & ArchAI</h3>
-              <span>Una conversación, un mismo diseño</span>
             </div>
             <button
               className="btn-studio-glass proposal-close"
@@ -542,225 +544,6 @@ export function ProposalPanel({
               <X size={16} />
             </button>
           </header>
-          <details className="proposal-preferences">
-            <summary>
-              Preferencias del asistente <ChevronRight size={13} />
-            </summary>
-            <div className="proposal-engine">
-              <span>Motor compartido de la sala</span>
-              <div className="proposal-engine-options" role="group" aria-label="Motor de la sala">
-                <button
-                  disabled={!state.settings.canConfigure}
-                  aria-pressed={state.settings.mode === 'cloud'}
-                  onClick={() => void state.configure({ mode: 'cloud' })}
-                >
-                  <Cloud size={13} /> Nube
-                </button>
-                <button
-                  disabled={!state.settings.canConfigure}
-                  aria-pressed={state.settings.mode === 'local'}
-                  onClick={() => {
-                    void state.configure({ mode: 'local' });
-                    void state.checkModel();
-                  }}
-                >
-                  <Cpu size={13} /> Local
-                </button>
-              </div>
-              <small>
-                {state.settings.mode === 'cloud'
-                  ? `Gemini${state.settings.cloud.fallbackEnabled ? ' → Claude como respaldo' : ''}. Las consultas pueden consumir cuota.`
-                  : 'Ollama en el equipo servidor. No se consumen APIs en nube.'}
-              </small>
-            </div>
-            {state.settings.mode === 'cloud' && (
-              <small className="proposal-hint">
-                {state.settings.cloud.geminiModel}
-                {state.settings.cloud.fallbackEnabled
-                  ? ` · respaldo ${state.settings.cloud.claudeModel}`
-                  : ''}
-              </small>
-            )}
-            {state.settings.mode === 'local' && (
-              <div className="proposal-local-model">
-                <label htmlFor="proposal-local-model">Modelo local</label>
-                <div className="proposal-model-controls">
-                  <select
-                    id="proposal-local-model"
-                    value={state.settings.model}
-                    disabled={!state.settings.canConfigure}
-                    onChange={(e) => void state.configure({ model: e.target.value })}
-                  >
-                    {!state.localModels.includes(state.settings.model) && (
-                      <option>{state.settings.model}</option>
-                    )}
-                    {state.localModels.map((m) => (
-                      <option key={m}>{m}</option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn-studio-glass"
-                    disabled={state.checkingModel}
-                    onClick={() => void state.checkModel()}
-                  >
-                    <RefreshCw size={12} /> Conectar
-                  </button>
-                </div>
-                <small>
-                  {state.modelError ||
-                    (state.localModels.includes(state.settings.model)
-                      ? `Conectado a Ollama · ${state.settings.model}`
-                      : 'Comprueba la disponibilidad del modelo en el servidor compartido.')}
-                </small>
-              </div>
-            )}
-            <div className="proposal-setting">
-              <div>
-                <span>
-                  <Eye size={12} /> Observación automática
-                </span>
-                <small>
-                  Tras cambios estructurales. Máximo una revisión/minuto y diez/hora, sin respaldo Claude.
-                </small>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                className="proposal-switch"
-                aria-label="Observación automática"
-                aria-checked={state.settings.observing}
-                disabled={!state.settings.canConfigure}
-                onClick={() => void state.configure({ observing: !state.settings.observing })}
-              >
-                <span />
-              </button>
-            </div>
-            {!state.settings.canConfigure && (
-              <small className="proposal-hint">El anfitrión administra el motor y la observación.</small>
-            )}
-            {import.meta.env.DEV && state.settings.cloud.testControls && state.settings.mode === 'cloud' && (
-              <div className="proposal-local-model">
-                <label htmlFor="proposal-cloud-provider">Proveedor para pruebas</label>
-                <div className="proposal-model-controls">
-                  <select
-                    id="proposal-cloud-provider"
-                    value={state.cloudOptions.provider || 'auto'}
-                    onChange={(e) =>
-                      state.setCloudOptions({
-                        ...state.cloudOptions,
-                        provider: e.target.value as CloudOptions['provider'],
-                      })
-                    }
-                  >
-                    <option value="auto">Gemini → Claude</option>
-                    <option value="gemini">Solo Gemini</option>
-                    <option value="claude">Solo Claude</option>
-                  </select>
-                </div>
-                <div className="proposal-setting">
-                  <div>
-                    <span>Permitir respaldo con Claude</span>
-                  </div>
-                  <button
-                    role="switch"
-                    aria-label="Permitir respaldo con Claude"
-                    className="proposal-switch"
-                    aria-checked={state.cloudOptions.allowFallback ?? state.settings.cloud.fallbackEnabled}
-                    disabled={!state.settings.cloud.fallbackEnabled}
-                    onClick={() =>
-                      state.setCloudOptions({
-                        ...state.cloudOptions,
-                        allowFallback: !(
-                          state.cloudOptions.allowFallback ?? state.settings.cloud.fallbackEnabled
-                        ),
-                      })
-                    }
-                  >
-                    <span />
-                  </button>
-                </div>
-              </div>
-            )}
-          </details>
-          <details className="proposal-preferences">
-            <summary>
-              <span>
-                <Users size={12} /> Equipo y continuidad
-              </span>
-              <ChevronRight size={13} />
-            </summary>
-            <div className="chat-members">
-              <span>
-                <Bot size={10} /> ArchAI · IA
-              </span>
-              {state.participants.map((p) => (
-                <span key={p.id} style={{ borderColor: p.avatarColor }}>
-                  {p.name}
-                </span>
-              ))}
-            </div>
-            <div className="proposal-review-actions">
-              <button
-                className="btn-studio-glass"
-                disabled={!review.canModerate}
-                onClick={() => void state.saveSession()}
-              >
-                <Save size={12} /> Guardar sesión
-              </button>
-              <button className="btn-studio-glass" onClick={() => void state.loadCheckpoints()}>
-                <History size={12} /> Puntos de control
-              </button>
-            </div>
-            {!!state.checkpoints.length && (
-              <div className="proposal-model-controls">
-                <select
-                  aria-label="Punto de control"
-                  value={checkpoint}
-                  onChange={(e) => setCheckpoint(e.target.value)}
-                >
-                  <option value="">Seleccionar guardado…</option>
-                  {state.checkpoints.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {new Date(p.savedAt).toLocaleString()} · {p.classes} clases
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn-studio-glass"
-                  disabled={!checkpoint || !review.canModerate}
-                  onClick={async () => {
-                    if (
-                      !window.confirm(
-                        '¿Restaurar este punto de control para todo el equipo? Se creará una nueva revisión.'
-                      )
-                    )
-                      return;
-                    const next = await state.restore(
-                      'restore',
-                      review.snapshot?.officialRevision || 0,
-                      checkpoint
-                    );
-                    if (next) review.receive(next);
-                  }}
-                >
-                  Restaurar
-                </button>
-              </div>
-            )}
-            {state.sessionNotice && (
-              <small className="proposal-hint" role="status">
-                {state.sessionNotice}
-              </small>
-            )}
-            {state.persistence && (!state.persistence.configured || !state.persistence.connected) && (
-              <small className="chat-sync-warning">
-                {!state.persistence.configured
-                  ? 'La conexión de sesiones aún no está configurada.'
-                  : 'La sesión espera sincronizarse con MongoDB.'}{' '}
-                Los cambios pendientes se conservan en el servidor.
-              </small>
-            )}
-          </details>
           {review.active && (
             <div className="proposal-review-tabs proposal-engine-options">
               <button aria-pressed={!reviewMode} onClick={() => setReviewMode(false)}>
@@ -797,7 +580,9 @@ export function ProposalPanel({
                   </button>
                 </div>
               )}
-              {visible.length >= 100 && (
+              {state.historyNotice ? (
+                <small className="proposal-hint" role="status">{state.historyNotice}</small>
+              ) : visible.length >= 100 && (
                 <button
                   className="btn-studio-glass chat-load-older"
                   onClick={() => {
