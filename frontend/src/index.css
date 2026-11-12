@@ -1459,14 +1459,6 @@ h1, h2, h3, h4, h5, h6 {
     display: none !important;
   }
 
-  /* Los nombres de proyecto y de usuario en la barra se recortan
-     (siguen intactos en la herramienta de título real y el perfil). */
-  .hud-topbar .studio-project-title {
-    max-width: 110px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 
 @media (max-width: 720px) {
@@ -1602,9 +1594,6 @@ h1, h2, h3, h4, h5, h6 {
     padding: 0 10px !important;
     height: 46px !important;
   }
-  .header-project-title {
-    max-width: 100px !important;
-  }
   .glass-command-dock {
     bottom: 12px !important;
     padding: 5px 8px !important;
@@ -1622,4 +1611,17 @@ h1, h2, h3, h4, h5, h6 {
     width: calc(100vw - 16px) !important;
     max-width: calc(100vw - 16px) !important;
   }
+}
+.studio-chat-unread {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: var(--accent-rose);
+  color: #fff;
+  font: 750 .65rem/1.3 var(--font-body);
+  text-align: center;
+  pointer-events: none;
 }

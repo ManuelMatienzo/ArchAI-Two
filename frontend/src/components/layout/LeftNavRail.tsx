@@ -24,6 +24,7 @@ export interface LeftNavRailProps {
   projectStructureOpen?: boolean;
   onToggleAssistant?: () => void;
   assistantOpen?: boolean;
+  unreadChatCount?: number;
 }
 
 export const LeftNavRail: React.FC<LeftNavRailProps> = ({
@@ -36,7 +37,8 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
   onToggleProjectStructure,
   projectStructureOpen = false,
   onToggleAssistant,
-  assistantOpen = false
+  assistantOpen = false,
+  unreadChatCount = 0
 }) => {
   const user = currentUser || {
     id: 'usr-default',
@@ -220,16 +222,22 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
         </button>
 
         {onToggleAssistant && <button
+          type="button"
           onClick={onToggleAssistant}
           title="Chat del equipo"
-          aria-label="Chat del equipo"
+          aria-label={unreadChatCount && !assistantOpen ? `Chat del equipo, ${unreadChatCount} mensajes nuevos` : 'Chat del equipo'}
           aria-expanded={assistantOpen}
-          style={{width:38,height:38,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',transition:'all 0.2s ease',
+          style={{width:38,height:38,borderRadius:10,position:'relative',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',transition:'all 0.2s ease',
             border:assistantOpen?'1px solid color-mix(in srgb, var(--glass-accent) 55%, transparent)':'1px solid transparent',
             background:assistantOpen?'color-mix(in srgb, var(--glass-accent) 22%, transparent)':'transparent',
             color:assistantOpen?'var(--accent-primary)':'var(--text-secondary)',
             boxShadow:assistantOpen?'0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)':'none'}}
-        ><MessageSquare size={18}/></button>}
+        >
+          <MessageSquare size={18} />
+          {!assistantOpen && unreadChatCount > 0 && (
+            <span className="studio-chat-unread" aria-hidden="true">{unreadChatCount > 99 ? '99+' : unreadChatCount}</span>
+          )}
+        </button>}
         {/* Configuración */}
         <button
           onClick={() => onSelectTab && onSelectTab('settings')}

@@ -96,7 +96,6 @@ interface InteractiveStudioCanvasProps {
   onDuplicateClass?: () => void;
   /** Enfoque de cámara centrado sobre una clase (Spotlight Quick Search) */
   focusTarget?: { classId: string; tick: number } | null;
-  onOpenQuickSearch?: () => void;
 }
 
 const PALETTE_COLORS = [
@@ -147,8 +146,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   onCopyClass,
   onPasteClass,
   onDuplicateClass,
-  focusTarget,
-  onOpenQuickSearch
+  focusTarget
 }) => {
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -586,13 +584,6 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           }
           return;
         }
-      }
-
-      // 10c. Búsqueda rápida Spotlight: Ctrl + K o Cmd + K
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        onOpenQuickSearch?.();
-        return;
       }
 
       // 11. Barra espaciadora para paneo ultra fluido estilo Figma/Miro

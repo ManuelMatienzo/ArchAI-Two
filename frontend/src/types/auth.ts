@@ -17,6 +17,8 @@ export interface PerfilUsuario {
 
 export interface InformacionSesion {
   roomId: string;
+  diagramId?: string;
+  projectId?: string | null;
   roomName: string;
   hostName: string;
   createdAt: string;

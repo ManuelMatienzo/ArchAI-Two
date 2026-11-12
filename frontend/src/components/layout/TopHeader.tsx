@@ -1,18 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
-  MessageSquare,
   Share2, 
   Download, 
   Code2, 
   Boxes, 
-  LogOut,
   Sun,
   Moon,
   Save,
   History,
   UserCircle,
   MoreVertical,
-  FolderKanban,
   FileOutput,
   Undo2,
   Redo2,
@@ -24,15 +22,23 @@ import {
 } from 'lucide-react';
 import { InformacionSesion } from '../../types/auth';
 import { RolEquipo } from '../../types/rbac';
-import { ShieldCheck, Sparkles } from 'lucide-react';
+import { ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react';
+import './TopHeader.css';
+
+interface HeaderMenuAction {
+  label: string;
+  icon: LucideIcon;
+  run?: () => void;
+  tooltip?: string;
+  shortcut?: string;
+}
 
 interface TopHeaderProps {
   session: InformacionSesion;
-  projectTitle: string;
+  projectName?: string;
+  diagramTitle: string;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
-  onOpenProjects?: () => void;
-  onSelectProjectTitle?: (title: string) => void;
   onExportXmi: () => void;
   /** CU/EA · Exportar XMI 1.1 nativo de Sparx (con diagrama) para Enterprise Architect. */
   onExportarEA?: () => void;
@@ -46,11 +52,7 @@ interface TopHeaderProps {
   onOpenQuickSearch?: () => void;
   onToggleCodeDock: () => void;
   isCodeDockOpen: boolean;
-  onToggleTeamChat?: () => void;
-  isTeamChatOpen?: boolean;
-  unreadChatCount?: number;
   onShare: () => void;
-  onLogout: () => void;
   /** CU-05 · Guardar diagrama en la nube */
   onGuardarNube?: () => void;
   /** CU-05 · Abrir gestor de versiones */
@@ -81,10 +83,10 @@ interface TopHeaderProps {
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
   session,
-  projectTitle,
+  projectName,
+  diagramTitle,
   theme,
   onToggleTheme,
-  onOpenProjects,
   onExportXmi,
   onExportarEA,
   onExportarVisual,
@@ -93,11 +95,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenQuickSearch,
   onToggleCodeDock,
   isCodeDockOpen,
-  onToggleTeamChat,
-  isTeamChatOpen = false,
-  unreadChatCount = 0,
   onShare,
-  onLogout,
   onGuardarNube,
   onVersiones,
   onPerfil,
@@ -116,23 +114,84 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 }) => {
   const [activeHoveredUser, setActiveHoveredUser] = useState<string | null>(null);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<boolean>(false);
+  const [moreMenuPosition, setMoreMenuPosition] = useState({ top: 0, anchorRight: 0 });
+  const moreMenuId = useId();
+  const moreMenuButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const hideUserTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cerrar menú al hacer clic fuera
+  useLayoutEffect(() => {
+    if (!isMoreMenuOpen) return;
+    const trigger = moreMenuButtonRef.current;
+    const header = trigger?.closest('header');
+    if (!trigger || !header) return;
+
+    const positionMenu = () => {
+      const { right } = trigger.getBoundingClientRect();
+      setMoreMenuPosition({ top: header.getBoundingClientRect().bottom + 6, anchorRight: window.innerWidth - right });
+    };
+    positionMenu();
+    moreMenuRef.current?.querySelector('button')?.focus({ preventScroll: true });
+    header.addEventListener('scroll', positionMenu);
+    window.addEventListener('resize', positionMenu);
+    window.visualViewport?.addEventListener('resize', positionMenu);
+    return () => {
+      header.removeEventListener('scroll', positionMenu);
+      window.removeEventListener('resize', positionMenu);
+      window.visualViewport?.removeEventListener('resize', positionMenu);
+    };
+  }, [isMoreMenuOpen]);
+
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+    if (!isMoreMenuOpen) return;
+    const closeOutside = (event: MouseEvent | FocusEvent) => {
+      const target = event.target as Node;
+      if (!moreMenuButtonRef.current?.contains(target) && !moreMenuRef.current?.contains(target)) {
         setIsMoreMenuOpen(false);
       }
     };
-    if (isMoreMenuOpen) {
-      window.addEventListener('mousedown', handleClickOutside);
-    }
+    window.addEventListener('mousedown', closeOutside);
+    window.addEventListener('focusin', closeOutside);
     return () => {
-      window.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('mousedown', closeOutside);
+      window.removeEventListener('focusin', closeOutside);
     };
   }, [isMoreMenuOpen]);
+
+  const closeMoreMenu = () => {
+    setIsMoreMenuOpen(false);
+    moreMenuButtonRef.current?.focus({ preventScroll: true });
+  };
+
+  const menuGroups: { title: string; actions: HeaderMenuAction[] }[] = [
+    {
+      title: 'Archivos',
+      actions: [
+        { label: 'Exportar XMI UML 2.5', icon: Download, run: onExportXmi },
+        { label: 'Exportar para Enterprise Architect', icon: FileOutput, run: onExportarEA, tooltip: 'Exportar XMI 1.1 con el diseño del diagrama y sus conectores' },
+        { label: 'Exportar respaldo (.archai.json)', icon: FileJson, run: onExportarArchivo, tooltip: 'Guardar una copia del proyecto en tu equipo' },
+        { label: 'Importar respaldo (.archai.json)', icon: Upload, run: onImportarArchivo, tooltip: 'Cargar el proyecto desde un archivo local' },
+        { label: 'Exportar imagen (PNG / SVG)', icon: Image, run: onExportarVisual, tooltip: 'Descargar como PNG de alta resolución o SVG vectorial' },
+      ],
+    },
+    {
+      title: 'Proyecto y equipo',
+      actions: [
+        { label: 'Historial de versiones', icon: History, run: onVersiones },
+        { label: 'Compartir PIN de sala', icon: Share2, run: onShare },
+        { label: 'Gestión de equipo y roles', icon: ShieldCheck, run: onOpenTeamModal },
+        { label: 'Auditoría de madurez de código', icon: Sparkles, run: onOpenMaturityAudit },
+      ],
+    },
+    {
+      title: 'Preferencias y ayuda',
+      actions: [
+        { label: theme === 'light' ? 'Modo oscuro' : 'Modo claro', icon: theme === 'light' ? Moon : Sun, run: onToggleTheme },
+        { label: 'Mi perfil', icon: UserCircle, run: onPerfil },
+        { label: 'Atajos de teclado', icon: Keyboard, run: onAbrirAtajos, shortcut: 'F1 o ?' },
+      ],
+    },
+  ];
 
   const handleUserHover = (userId: string) => {
     if (hideUserTimerRef.current) clearTimeout(hideUserTimerRef.current);
@@ -164,8 +223,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         gap: '12px'
       }}
     >
-      {/* ─── Izquierda: Brand Logo + Proyecto + Sala PIN ─── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+      {/* Logo y nombre del proyecto */}
+      <div className="studio-header-context">
         {/* Brand Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           <div style={{
@@ -182,7 +241,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           }}>
             <Boxes size={17} color="#e8c39e" />
           </div>
-          <span style={{
+          <span className="studio-header-wordmark" style={{
             fontFamily: 'var(--font-heading)',
             fontSize: '1.18rem',
             fontWeight: 800,
@@ -196,83 +255,27 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         {/* Separator */}
         <div className="header-divider-hide-mobile" style={{ width: '1px', height: '18px', background: 'var(--glass-topbar-border)' }} />
 
-        {/* Botón Gestión de Proyectos (CU-02) */}
-        {onOpenProjects && (
-          <button
-            onClick={onOpenProjects}
-            className="btn-studio-glass"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.78rem',
-              fontWeight: 700,
-              background: '#2f2c79',
-              border: '1px solid #2f2c79',
-              color: '#f5e1ce',
-              padding: '4px 10px',
-              borderRadius: '7px',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              transition: 'all 0.15s ease'
-            }}
-            title="Abrir el Hub de Proyectos y Diagramas"
-          >
-            <FolderKanban size={14} color="#e8c39e" />
-            <span>Proyectos</span>
-          </button>
-        )}
-
-        {/* Título del Proyecto */}
-        <div
-          className="header-project-title"
-          style={{
-            color: 'var(--text-primary)',
-            fontSize: '0.86rem',
-            fontWeight: 700,
-            fontFamily: 'var(--font-heading)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            maxWidth: '180px'
-          }}
-          title={projectTitle}
+        <span
+          className="studio-header-title"
+          title={projectName ? `Proyecto: ${projectName}\nDiagrama: ${diagramTitle}` : `Diagrama: ${diagramTitle}`}
         >
-          {projectTitle}
-        </div>
+          {projectName || diagramTitle}
+        </span>
+      </div>
 
+      <div className="studio-header-actions">
         {/* Acceso Rápido Spotlight (Ctrl + K) */}
         {onOpenQuickSearch && (
           <button
+            type="button"
             onClick={onOpenQuickSearch}
-            className="btn-studio-glass"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 9px',
-              fontSize: '0.74rem',
-              color: 'var(--text-secondary)',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid var(--glass-border-color, rgba(255, 255, 255, 0.1))',
-              borderRadius: '7px',
-              cursor: 'pointer'
-            }}
-            title="Buscar clases, atributos, métodos o comandos (Ctrl + K)"
+            className="btn-studio-glass studio-header-search"
+            aria-label="Buscar"
+            aria-keyshortcuts="Control+K Meta+K"
+            title="Buscar · Ctrl + K"
           >
-            <Search size={13} color="var(--accent-cyan, #38bdf8)" />
-            <span style={{ color: 'var(--text-secondary)' }}>Buscar...</span>
-            <kbd style={{
-              background: 'rgba(255, 255, 255, 0.08)',
-              padding: '1px 5px',
-              borderRadius: '4px',
-              fontSize: '0.62rem',
-              fontFamily: 'var(--font-mono)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              color: 'var(--text-primary)'
-            }}>
-              Ctrl K
-            </kbd>
+            <Search size={15} aria-hidden="true" />
+            <span>Buscar</span>
           </button>
         )}
 
@@ -308,10 +311,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           />
           <span>{session.roomId || 'LOCAL'}</span>
         </button>
-      </div>
 
-      {/* ─── Derecha: Guardar + Avatares + Código + Menú Más ─── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
         {/* Medidor de Madurez Global del Software */}
         {maturityScore !== undefined && (
           <button
@@ -484,6 +484,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         {/* Botón Principal Guardar en Nube (CU-05) */}
         {onGuardarNube && (
           <button
+            type="button"
             onClick={onGuardarNube}
             className="btn-studio-primary"
             style={{
@@ -494,19 +495,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               alignItems: 'center',
               gap: '6px'
             }}
-            title="Guardar el diagrama actual en la nube (Ctrl+S)"
+            aria-label="Guardar"
+            aria-keyshortcuts="Control+S Meta+S"
+            title="Guardar el diagrama en la nube · Ctrl + S"
           >
-            <Save size={14} />
+            <Save size={14} aria-hidden="true" />
             <span className="hide-on-mobile">Guardar</span>
-            <kbd style={{
-              fontSize: '0.62rem',
-              opacity: 0.85,
-              background: 'rgba(255, 255, 255, 0.2)',
-              padding: '1px 5px',
-              borderRadius: '4px',
-              fontFamily: 'monospace',
-              fontWeight: 800
-            }}>Ctrl+S</kbd>
           </button>
         )}
 
@@ -531,442 +525,63 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <span className="hide-on-mobile">Código</span>
         </button>
 
-        {/* Botón Chat de Equipo en Vivo */}
-        {onToggleTeamChat && (
-          <button
-            onClick={onToggleTeamChat}
-            className="btn-studio-glass"
-            style={{
-              background: isTeamChatOpen ? 'var(--btn-studio-share-bg)' : undefined,
-              borderColor: isTeamChatOpen ? 'var(--btn-studio-share-border)' : undefined,
-              color: isTeamChatOpen ? 'var(--accent-primary)' : undefined,
-              padding: '6px 12px',
-              fontSize: '0.76rem',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              position: 'relative'
-            }}
-            title="Abrir chat en tiempo real con el equipo móvil y anfitrión"
-          >
-            <MessageSquare size={15} />
-            <span className="hide-on-mobile">Chat</span>
-            {unreadChatCount > 0 && !isTeamChatOpen && (
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '-4px',
-                  right: '-4px',
-                  background: '#ef4444',
-                  color: '#ffffff',
-                  fontSize: '0.62rem',
-                  fontWeight: 900,
-                  borderRadius: '10px',
-                  padding: '1px 5px',
-                  minWidth: '16px',
-                  textAlign: 'center',
-                  boxShadow: '0 0 8px rgba(239, 68, 68, 0.7)'
-                }}
-              >
-                {unreadChatCount}
-              </span>
-            )}
-          </button>
-        )}
-
         {/* ─── Menú Glass Desplegable de Más Opciones [ ⋯ ] ─── */}
-        <div ref={moreMenuRef} style={{ position: 'relative' }}>
-          <button
-            onClick={() => setIsMoreMenuOpen(prev => !prev)}
-            className="btn-studio-glass"
+        <button
+          type="button"
+          ref={moreMenuButtonRef}
+          onClick={() => setIsMoreMenuOpen(open => !open)}
+          className="btn-studio-glass"
+          style={{ padding: '6px 10px', background: isMoreMenuOpen ? 'var(--glass-surface-hover)' : undefined }}
+          aria-label="Más opciones de proyecto y configuración"
+          title="Más opciones de proyecto y configuración"
+          aria-expanded={isMoreMenuOpen}
+          aria-controls={isMoreMenuOpen ? moreMenuId : undefined}
+        >
+          <MoreVertical size={16} />
+        </button>
+
+        {isMoreMenuOpen && createPortal(
+          <div
+            id={moreMenuId}
+            ref={moreMenuRef}
+            className="studio-more-menu"
+            role="group"
+            aria-label="Más opciones del proyecto"
             style={{
-              padding: '6px 10px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: isMoreMenuOpen ? 'var(--glass-surface-hover)' : undefined
+              '--studio-menu-top': `${moreMenuPosition.top}px`,
+              '--studio-menu-anchor-right': `${moreMenuPosition.anchorRight}px`,
+            } as React.CSSProperties}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                closeMoreMenu();
+              }
             }}
-            title="Más opciones de proyecto y configuración"
           >
-            <MoreVertical size={16} />
-          </button>
-
-          {isMoreMenuOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '44px',
-                right: 0,
-                background: 'var(--popover-bg)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                border: '1px solid var(--glass-topbar-border)',
-                borderRadius: '14px',
-                padding: '8px',
-                minWidth: '220px',
-                boxShadow: '0 16px 40px rgba(0, 0, 0, 0.25)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '3px',
-                zIndex: 120,
-                animation: 'fadeIn 0.15s ease-out'
-              }}
-            >
-              {/* Exportar XMI */}
-              <button
-                onClick={() => {
-                  onExportXmi();
-                  setIsMoreMenuOpen(false);
-                }}
-                className="btn-studio-glass"
-                style={{
-                  justifyContent: 'flex-start',
-                  border: 'none',
-                  padding: '8px 12px',
-                  fontSize: '0.78rem',
-                  gap: '8px'
-                }}
-              >
-                <Download size={14} color="var(--accent-cyan)" />
-                <span>Exportar XMI UML 2.5</span>
-              </button>
-
-              {/* Exportar para Enterprise Architect (XMI 1.1 con diagrama) */}
-              {onExportarEA && (
-                <button
-                  onClick={() => {
-                    onExportarEA();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px',
-                    textAlign: 'left'
-                  }}
-                  title="Exportar XMI 1.1 nativo de Sparx con geometría, layout de diagrama y conectores"
-                >
-                  <FileOutput size={14} color="var(--accent-cyan)" />
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Exportar para Enterprise Architect</span>
-                    <span style={{ fontSize: '0.66rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>XMI 1.1 con Diagrama, Layout y Conectores</span>
-                  </div>
-                </button>
-              )}
-
-              {/* Exportar Archivo .archai.json */}
-              {onExportarArchivo && (
-                <button
-                  onClick={() => {
-                    onExportarArchivo();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px',
-                    textAlign: 'left'
-                  }}
-                  title="Exportar respaldo completo del proyecto en formato JSON nativo de ArchAI"
-                >
-                  <FileJson size={14} color="#38bdf8" />
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Exportar Archivo (.archai.json)</span>
-                    <span style={{ fontSize: '0.66rem', color: '#38bdf8', fontWeight: 600 }}>Respaldo offline portable</span>
-                  </div>
-                </button>
-              )}
-
-              {/* Importar Archivo .archai.json */}
-              {onImportarArchivo && (
-                <button
-                  onClick={() => {
-                    onImportarArchivo();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px',
-                    textAlign: 'left'
-                  }}
-                  title="Abrir o restaurar un proyecto desde archivo local (.archai.json)"
-                >
-                  <Upload size={14} color="#34d399" />
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Importar Archivo (.archai.json)</span>
-                    <span style={{ fontSize: '0.66rem', color: '#34d399', fontWeight: 600 }}>Cargar modelo desde tu equipo</span>
-                  </div>
-                </button>
-              )}
-
-              {/* Exportar Imagen PNG / SVG (Alta Resolución) */}
-              {onExportarVisual && (
-                <button
-                  onClick={() => {
-                    onExportarVisual();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px',
-                    textAlign: 'left'
-                  }}
-                  title="Descargar diagrama en alta definición PNG (2x/3x Retina) o formato vectorial SVG"
-                >
-                  <Image size={14} color="#e8c39e" />
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Exportar Imagen (PNG / SVG)</span>
-                    <span style={{ fontSize: '0.66rem', color: '#e8c39e', fontWeight: 600 }}>Alta resolución Retina / Print (2x/3x)</span>
-                  </div>
-                </button>
-              )}
-
-              {/* Versiones */}
-              {onVersiones && (
-                <button
-                  onClick={() => {
-                    onVersiones();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px'
-                  }}
-                >
-                  <History size={14} color="var(--accent-primary)" />
-                  <span>Historial de Versiones</span>
-                </button>
-              )}
-
-              {/* Compartir Sala */}
-              <button
-                onClick={() => {
-                  onShare();
-                  setIsMoreMenuOpen(false);
-                }}
-                className="btn-studio-glass"
-                style={{
-                  justifyContent: 'flex-start',
-                  border: 'none',
-                  padding: '8px 12px',
-                  fontSize: '0.78rem',
-                  gap: '8px'
-                }}
-              >
-                <Share2 size={14} color="var(--accent-emerald)" />
-                <span>Compartir PIN de Sala</span>
-              </button>
-
-              {/* Gestión de Equipo & Permisos (RBAC) */}
-              {onOpenTeamModal && (
-                <button
-                  onClick={() => {
-                    onOpenTeamModal();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px'
-                  }}
-                >
-                  <ShieldCheck size={14} color="var(--accent-cyan)" />
-                  <span>Gestión de Equipo & Roles</span>
-                </button>
-              )}
-
-              {/* Auditoría de Madurez de Código */}
-              {onOpenMaturityAudit && (
-                <button
-                  onClick={() => {
-                    onOpenMaturityAudit();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px'
-                  }}
-                >
-                  <Sparkles size={14} color="#F59E0B" />
-                  <span>Auditoría de Madurez de Código</span>
-                </button>
-              )}
-
-              {/* Conmutador Tema Claro / Oscuro */}
-              <button
-                onClick={() => {
-                  onToggleTheme();
-                  setIsMoreMenuOpen(false);
-                }}
-                className="btn-studio-glass"
-                style={{
-                  justifyContent: 'flex-start',
-                  border: 'none',
-                  padding: '8px 12px',
-                  fontSize: '0.78rem',
-                  gap: '8px'
-                }}
-              >
-                {theme === 'light' ? (
-                  <>
-                    <Moon size={14} color="var(--accent-primary)" />
-                    <span>Modo Oscuro</span>
-                  </>
-                ) : (
-                  <>
-                    <Sun size={14} color="#f59e0b" />
-                    <span>Modo Claro</span>
-                  </>
-                )}
-              </button>
-
-              {/* Perfil */}
-              {onPerfil && (
-                <button
-                  onClick={() => {
-                    onPerfil();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px'
-                  }}
-                >
-                  <UserCircle size={14} />
-                  <span>Mi Perfil ({session.currentUser?.name?.split(' ')[0]})</span>
-                </button>
-              )}
-
-              {/* Atajos de Teclado */}
-              {onAbrirAtajos && (
-                <button
-                  onClick={() => {
-                    onAbrirAtajos();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px'
-                  }}
-                >
-                  <Keyboard size={14} color="#38bdf8" />
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                    <span>Atajos de Teclado</span>
-                    <kbd style={{ fontSize: '0.65rem', opacity: 0.7, background: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px', fontFamily: 'monospace' }}>F1 o ?</kbd>
-                  </div>
-                </button>
-              )}
-
-              {/* Exportar Archivo .archai.json */}
-              {onExportarArchivo && (
-                <button
-                  onClick={() => {
-                    onExportarArchivo();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px',
-                    textAlign: 'left'
-                  }}
-                  title="Exportar respaldo completo del proyecto en formato JSON nativo de ArchAI"
-                >
-                  <FileJson size={14} color="#38bdf8" />
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Exportar Archivo (.archai.json)</span>
-                    <span style={{ fontSize: '0.66rem', color: '#38bdf8', fontWeight: 600 }}>Respaldo offline portable</span>
-                  </div>
-                </button>
-              )}
-
-              {/* Importar Archivo .archai.json */}
-              {onImportarArchivo && (
-                <button
-                  onClick={() => {
-                    onImportarArchivo();
-                    setIsMoreMenuOpen(false);
-                  }}
-                  className="btn-studio-glass"
-                  style={{
-                    justifyContent: 'flex-start',
-                    border: 'none',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    gap: '8px',
-                    textAlign: 'left'
-                  }}
-                  title="Abrir o restaurar un proyecto desde archivo local (.archai.json)"
-                >
-                  <Upload size={14} color="#34d399" />
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Importar Archivo (.archai.json)</span>
-                    <span style={{ fontSize: '0.66rem', color: '#34d399', fontWeight: 600 }}>Cargar modelo desde tu equipo</span>
-                  </div>
-                </button>
-              )}
-
-              <div style={{ height: '1px', background: 'var(--glass-topbar-border)', margin: '4px 0' }} />
-
-              {/* Salir */}
-              <button
-                onClick={() => {
-                  onLogout();
-                  setIsMoreMenuOpen(false);
-                }}
-                className="btn-studio-glass"
-                style={{
-                  justifyContent: 'flex-start',
-                  border: 'none',
-                  padding: '8px 12px',
-                  fontSize: '0.78rem',
-                  color: '#fb7185',
-                  gap: '8px'
-                }}
-              >
-                <LogOut size={14} />
-                <span>Cerrar Sesión</span>
-              </button>
-            </div>
-          )}
-        </div>
+            {menuGroups.map(({ title, actions }) => (
+              <div className="studio-more-menu-group" key={title} role="group" aria-label={title}>
+                <div className="studio-more-menu-heading" aria-hidden="true">{title}</div>
+                {actions.map(({ label, icon: Icon, run, tooltip, shortcut }) => run && (
+                  <button
+                    key={label}
+                    type="button"
+                    title={tooltip}
+                    className="studio-more-menu-action"
+                    onClick={() => {
+                      closeMoreMenu();
+                      run();
+                    }}
+                  >
+                    <Icon size={15} aria-hidden="true" />
+                    <span>{label}</span>
+                    {shortcut && <kbd>{shortcut}</kbd>}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>,
+          document.body
+        )}
       </div>
     </header>
   );

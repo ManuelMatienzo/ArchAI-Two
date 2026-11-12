@@ -83,6 +83,7 @@ export function useProposals(
   const generation = useRef(0),
     flushing = useRef(false);
   const cacheKey = `${session.currentUser.id}/${session.roomId}/${diagramId || 'unsaved'}`;
+  const deliveredMessages = useRef(new Set<string>());
   const path = (suffix: string) => {
     const c = current.current;
     if (!c.diagramId)
@@ -140,6 +141,7 @@ export function useProposals(
     setHistoryNotice('');
     setNotice(null);
     setUnread(0);
+    deliveredMessages.current.clear();
     setError('');
     void readSessionCache<{ messages: RoomMessage[] }>(cacheKey).then((c) => {
       if (c && version === generation.current)
@@ -235,16 +237,16 @@ export function useProposals(
     return true;
   };
   const receive = (event: { tipo: string; payload: any }) => {
-    if (event.tipo === 'chat_message' && event.payload?.roomId === current.current.session.roomId) {
+    if (event.tipo === 'chat_message' && event.payload?.roomId === current.current.session.roomId &&
+        event.payload.diagramId === current.current.diagramId) {
       const m = event.payload as RoomMessage;
       upsert([m]);
-      if (
-        !current.current.open &&
-        m.authorId !== current.current.session.currentUser.id &&
-        m.status === 'sent'
-      ) {
-        setUnread((n) => n + 1);
-        if (m.proposal) setNotice(m.proposal);
+      if (m.status === 'sent' && !deliveredMessages.current.has(m.id)) {
+        deliveredMessages.current.add(m.id);
+        if (!current.current.open && m.authorId !== current.current.session.currentUser.id) {
+          setUnread((n) => n + 1);
+          if (m.proposal) setNotice(m.proposal);
+        }
       }
     }
     if (event.tipo === 'chat_settings') applySettings(event.payload);

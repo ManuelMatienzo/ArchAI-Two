@@ -6,7 +6,6 @@ import { TopHeader as BarraSuperior } from '../../components/layout/TopHeader';
 import { ProjectStructureFlyout as PanelEstructuraProyecto } from '../../components/canvas/ProjectStructureFlyout';
 import { InteractiveStudioCanvas as LienzoInteractivoStudio } from '../../components/canvas/InteractiveStudioCanvas';
 import { StudioSettings } from './StudioSettings';
-import { TeamChatDock, TeamChatMessage } from '../../components/collaboration/TeamChatDock';
 import { CollaborationPanel as PanelColaboracion } from '../../components/collaboration/CollaborationPanel';
 import { RolEquipo, PermisosUsuario, MiembroEquipo, obtenerPermisosRol } from '../../types/rbac';
 
@@ -54,6 +53,7 @@ import {
   actualizarPerfil,
   diagramaDesdeBackend,
   listarProyectos,
+  obtenerProyecto,
   listarDiagramas,
   obtenerDiagrama,
   construirPayloadDiagrama,
@@ -196,13 +196,24 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const [searchParams] = useSearchParams();
   const location = useLocation();
 
-  const urlRoomId = propRoomId || params.roomId || searchParams.get('roomId') || undefined;
   const explicitDiagramId=params.diagramId||searchParams.get('diagramId')||(location.state as any)?.diagramId;
-  const [resolvedRoomDiagramId,setResolvedRoomDiagramId]=useState<string|undefined>();
-  const diagramId=explicitDiagramId||(urlRoomId?resolvedRoomDiagramId:propDiagramId||localStorage.getItem('archai_selected_diagram_id')||undefined);
+  const urlRoomId = params.roomId || searchParams.get('roomId') || (explicitDiagramId ? undefined : propRoomId);
+  const [resolvedRoomDiagram, setResolvedRoomDiagram] = useState<{ roomId: string; diagramId: string }>();
+  const diagramId = explicitDiagramId || (urlRoomId
+    ? (resolvedRoomDiagram?.roomId === urlRoomId ? resolvedRoomDiagram.diagramId : undefined)
+    : propDiagramId || localStorage.getItem('archai_selected_diagram_id') || undefined);
   const projectTitle=searchParams.get('title')||(location.state as any)?.projectTitle||propProjectTitle||localStorage.getItem('archai_selected_project_title')||undefined;
   const initialDiagram=(location.state as any)?.diagram||(!urlRoomId&&propDiagramId===diagramId?propInitialDiagram:undefined);
-  useEffect(()=>{if(!urlRoomId||explicitDiagramId)return;let active=true;void apiFetch<any>(`/api/v1/colaboracion/salas/${encodeURIComponent(urlRoomId)}`).then(room=>{if(active)setResolvedRoomDiagramId(room.diagramId);}).catch(e=>{if(active)setSaveInfo({tipo:'error',texto:e.message});});return()=>{active=false;};},[urlRoomId,explicitDiagramId]);
+  useEffect(() => {
+    if (!urlRoomId || explicitDiagramId) return;
+    let active = true;
+    void apiFetch<{ diagramId?: string }>(`/api/v1/colaboracion/salas/${encodeURIComponent(urlRoomId)}`)
+      .then(room => {
+        if (active && room.diagramId) setResolvedRoomDiagram({ roomId: urlRoomId, diagramId: room.diagramId });
+      })
+      .catch(e => { if (active) setSaveInfo({ tipo: 'error', texto: e.message }); });
+    return () => { active = false; };
+  }, [urlRoomId, explicitDiagramId]);
 
   const [currentSession, setCurrentSession] = useState<InformacionSesion>(() => {
     if (propSession) {
@@ -323,9 +334,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     return 'canvas';
   });
   const [isProjectStructureOpen, setIsProjectStructureOpen] = useState(false);
-  const [isTeamChatOpen, setIsTeamChatOpen] = useState<boolean>(false);
-  const [teamChatMessages, setTeamChatMessages] = useState<TeamChatMessage[]>([]);
-  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+  const [projectName, setProjectName] = useState<{ key: string; name: string } | null>(null);
 
   const [isCodeDockOpen, setIsCodeDockOpen] = useState<boolean>(() => {
     if (initialDock === 'code') return true;
@@ -639,6 +648,23 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     }).catch(e=>{if(live)setSaveInfo({tipo:'error',texto:e instanceof Error?e.message:'No se pudo abrir la sala del proyecto.'});});
     return()=>{live=false;};
   },[diagramId,urlRoomId]);
+  const requestedPin = urlRoomId?.trim().toUpperCase();
+  const canonicalPin = requestedPin && !requestedPin.startsWith('ARC-') ? `ARC-${requestedPin}` : requestedPin;
+  const activeProjectId = diagramId && currentSession.diagramId === diagramId &&
+    (!canonicalPin || currentSession.roomId === canonicalPin)
+      ? currentSession.projectId
+      : undefined;
+  const projectNameKey = activeProjectId ? `${currentSession.currentUser.id}/${activeProjectId}` : '';
+  useEffect(() => {
+    if (!activeProjectId) return;
+    let active = true;
+    void obtenerProyecto(activeProjectId).then(project => {
+      if (active) setProjectName({ key: projectNameKey, name: project.nombre });
+    }).catch(() => {
+      if (active) setProjectName(null);
+    });
+    return () => { active = false; };
+  }, [activeProjectId, projectNameKey]);
   const [remoteCursors, setRemoteCursors] = useState<{ id: string; name: string; color: string; x: number; y: number }[]>([]);
   const [remoteDraggingNodes, setRemoteDraggingNodes] = useState<Record<string, { name: string; color: string }>>({});
   const timersRemoteDragRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -1281,7 +1307,10 @@ export const StudioPage: React.FC<StudioPageProps> = ({
 
   const handleSelectRailTab = (tab: 'canvas' | 'team' | 'settings') => {
     setActiveRailTab(tab);
-    if (tab !== 'canvas') setIsProjectStructureOpen(false);
+    if (tab !== 'canvas') {
+      setIsProjectStructureOpen(false);
+      proposals.setOpen(false);
+    }
     const newParams = new URLSearchParams(location.search);
     if (tab === 'canvas') {
       newParams.delete('tab');
@@ -1375,22 +1404,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const maturityScore = useMemo(() => {
     return calcularMadurezProyecto(diagram).porcentajeGlobal;
   }, [diagram]);
-
-    const handleSendTeamChatMessage = (texto: string) => {
-    if (!texto.trim() || !stompRef.current?.estaConectado()) return;
-    const msg: TeamChatMessage = {
-      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-      senderId: currentSession.currentUser.id,
-      sender: currentSession.currentUser.name,
-      senderRole: currentSession.currentUser.role || 'ARQUITECTO',
-      content: texto.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      roomId: currentSession.roomId,
-      status: 'entregado',
-    };
-    setTeamChatMessages(prev => [...prev, msg]);
-    stompRef.current.publicar('chat', msg);
-  };
 
   const handleRoleChange = (newRole: RolEquipo) => {
     setCurrentRole(newRole);
@@ -1673,6 +1686,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           setIsProjectStructureOpen(open => activeRailTab !== 'canvas' || !open);
         }}
         assistantOpen={activeRailTab === 'canvas' && proposals.open}
+        unreadChatCount={proposals.unread}
         onToggleAssistant={() => {
           if (activeRailTab !== 'canvas') handleSelectRailTab('canvas');
           proposals.setOpen(activeRailTab !== 'canvas' || !proposals.open);
@@ -1695,10 +1709,10 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         {/* 2. Barra Superior con Selector de Tema */}
         <BarraSuperior
           session={currentSession}
-          projectTitle={diagram.title}
+          projectName={projectName?.key === projectNameKey ? projectName.name : undefined}
+          diagramTitle={diagram.title}
           theme={theme}
           onToggleTheme={handleToggleTheme}
-          onOpenProjects={onOpenProjects}
           onExportXmi={handleExportXmi}
           onExportarEA={handleExportarEA}
           onExportarVisual={() => setShowExportarVisualModal(true)}
@@ -1707,14 +1721,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           onOpenQuickSearch={() => setIsQuickSearchOpen(true)}
           onToggleCodeDock={() => setIsCodeDockOpen(prev => !prev)}
           isCodeDockOpen={isCodeDockOpen}
-          onToggleTeamChat={() => {
-            setIsTeamChatOpen(prev => !prev);
-            setUnreadChatCount(0);
-          }}
-          isTeamChatOpen={isTeamChatOpen}
-          unreadChatCount={unreadChatCount}
           onShare={() => setShowShareModal(true)}
-          onLogout={onLogout}
           onGuardarNube={() => setShowGuardarModal(true)}
           onVersiones={manejarAbrirVersiones}
           onPerfil={() => setShowPerfilModal(true)}
@@ -1838,7 +1845,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             onPasteClass={handlePasteClass}
             onDuplicateClass={handleDuplicateClass}
             focusTarget={focusTarget}
-            onOpenQuickSearch={() => setIsQuickSearchOpen(true)}
           />
 
           {/* 3. Panel Flotante de Estructura del Proyecto */}
@@ -1874,17 +1880,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
             </Suspense>
           )}
 
-          {/* Chat Colaborativo en Vivo con el Equipo Móvil y Anfitrión */}
-          {isTeamChatOpen && (
-            <TeamChatDock
-              isOpen={isTeamChatOpen}
-              onClose={() => setIsTeamChatOpen(false)}
-              messages={teamChatMessages}
-              onSendMessage={handleSendTeamChatMessage}
-              currentUser={currentSession.currentUser}
-              roomId={currentSession.roomId}
-            />
-          )}
             </>
           )}
 

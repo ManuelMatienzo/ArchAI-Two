@@ -230,6 +230,10 @@ export function listarProyectos(usuarioId?: string): Promise<Proyecto[]> {
   return apiFetch<Proyecto[]>(`/api/v1/proyectos${query}`);
 }
 
+export function obtenerProyecto(proyectoId: string): Promise<Proyecto> {
+  return apiFetch<Proyecto>(`/api/v1/proyectos/${encodeURIComponent(proyectoId)}`);
+}
+
 export function crearProyecto(datos: { nombre: string; descripcion?: string; iconoColor?: string; propietarioId: string }): Promise<Proyecto> {
   return apiFetch<Proyecto>('/api/v1/proyectos', {
     method: 'POST',
