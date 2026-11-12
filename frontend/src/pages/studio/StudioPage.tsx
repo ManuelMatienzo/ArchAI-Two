@@ -1672,8 +1672,11 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           if (activeRailTab !== 'canvas') handleSelectRailTab('canvas');
           setIsProjectStructureOpen(open => activeRailTab !== 'canvas' || !open);
         }}
-        assistantOpen={proposals.open}
-        onToggleAssistant={() => {setActiveRailTab('canvas');proposals.setOpen(!proposals.open);}}
+        assistantOpen={activeRailTab === 'canvas' && proposals.open}
+        onToggleAssistant={() => {
+          if (activeRailTab !== 'canvas') handleSelectRailTab('canvas');
+          proposals.setOpen(activeRailTab !== 'canvas' || !proposals.open);
+        }}
         onSelectTab={handleSelectRailTab}
         currentUser={currentSession.currentUser}
         onLogout={onLogout}

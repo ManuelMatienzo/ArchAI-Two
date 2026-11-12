@@ -530,12 +530,7 @@ export function ProposalPanel({
           aria-label="Chat del equipo"
         >
           <header className="proposal-header">
-            <div className="proposal-avatar">
-              <MessageSquare size={18} />
-            </div>
-            <div className="proposal-heading">
-              <h3>Equipo & ArchAI</h3>
-            </div>
+            <h3>Equipo y ArchAI</h3>
             <button
               className="btn-studio-glass proposal-close"
               aria-label="Cerrar chat"

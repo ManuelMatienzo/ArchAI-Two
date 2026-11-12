@@ -7,7 +7,7 @@ import {
   LogOut,
   FolderKanban,
   FolderTree,
-  Bot
+  MessageSquare
 } from 'lucide-react';
 import { PerfilUsuario } from '../../types/auth';
 
@@ -221,15 +221,15 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
 
         {onToggleAssistant && <button
           onClick={onToggleAssistant}
-          title="@ArchAI · Propuestas del equipo"
-          aria-label="Abrir propuestas de ArchAI"
+          title="Chat del equipo"
+          aria-label="Chat del equipo"
           aria-expanded={assistantOpen}
           style={{width:38,height:38,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',transition:'all 0.2s ease',
             border:assistantOpen?'1px solid color-mix(in srgb, var(--glass-accent) 55%, transparent)':'1px solid transparent',
             background:assistantOpen?'color-mix(in srgb, var(--glass-accent) 22%, transparent)':'transparent',
             color:assistantOpen?'var(--accent-primary)':'var(--text-secondary)',
             boxShadow:assistantOpen?'0 0 12px color-mix(in srgb, var(--glass-accent) 40%, transparent)':'none'}}
-        ><Bot size={18}/></button>}
+        ><MessageSquare size={18}/></button>}
         {/* Configuración */}
         <button
           onClick={() => onSelectTab && onSelectTab('settings')}

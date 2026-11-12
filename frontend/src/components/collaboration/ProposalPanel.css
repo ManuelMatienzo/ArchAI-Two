@@ -13,9 +13,7 @@
 .proposal-panel { position: absolute; left: 16px; top: 16px; bottom: 84px; width: 370px; max-width: calc(100% - 32px); z-index: 43; display: flex; flex-direction: column; overflow: hidden; }
 .proposal-panel *, .proposal-notice * { box-sizing: border-box; }
 .proposal-header { display: flex; align-items: center; gap: 11px; padding: 12px 20px; border-bottom: 1px solid var(--glass-border-color); }
-.proposal-avatar { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid var(--glass-ai-icon-border); border-radius: 11px; background: var(--glass-ai-icon-bg); color: var(--glass-ai-icon-color); }
-.proposal-heading { flex: 1; }
-.proposal-heading h3 { margin: 0; font: 800 18px var(--font-heading); letter-spacing: -.02em; }
+.proposal-header h3 { flex: 1; margin: 0; font: 800 18px var(--font-heading); letter-spacing: -.02em; }
 .proposal-close { padding: 7px !important; border-radius: 8px; }
 .proposal-switch { width: 32px; height: 19px; padding: 2px; flex-shrink: 0; border: 1px solid var(--glass-border-color); background: var(--glass-surface); border-radius: 99px; cursor: pointer; transition: background .2s; }
 .proposal-switch span { display: block; width: 13px; height: 13px; background: var(--text-muted); border-radius: 50%; transition: transform .2s; }
