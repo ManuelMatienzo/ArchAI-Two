@@ -216,7 +216,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               whiteSpace: 'nowrap',
               transition: 'all 0.15s ease'
             }}
-            title="Abrir el Hub de Proyectos y Diagramas (CU-02)"
+            title="Abrir el Hub de Proyectos y Diagramas"
           >
             <FolderKanban size={14} color="#e8c39e" />
             <span>Proyectos</span>
@@ -753,7 +753,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   }}
                 >
                   <History size={14} color="var(--accent-primary)" />
-                  <span>Historial de Versiones (CU-05)</span>
+                  <span>Historial de Versiones</span>
                 </button>
               )}
 
@@ -773,7 +773,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 }}
               >
                 <Share2 size={14} color="var(--accent-emerald)" />
-                <span>Compartir PIN de Sala (CU-03)</span>
+                <span>Compartir PIN de Sala</span>
               </button>
 
               {/* Gestión de Equipo & Permisos (RBAC) */}

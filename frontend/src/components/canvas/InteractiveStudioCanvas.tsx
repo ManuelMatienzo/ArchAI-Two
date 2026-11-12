@@ -4498,7 +4498,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 color: 'var(--text-primary)',
                 whiteSpace: 'nowrap'
               }}
-              title="Digitalizar diagrama dibujado a mano con IA (CU-11)"
+              title="Digitalizar diagrama dibujado a mano con IA"
             >
               <Camera size={14} />
               <span className="dock-btn-label">Pizarra OCR</span>
@@ -4522,7 +4522,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 boxShadow: isAiAssistantOpen ? '0 0 16px rgba(232, 195, 158, 0.45)' : undefined,
                 whiteSpace: 'nowrap'
               }}
-              title="Alternar asistente de IA por voz y lenguaje natural (CU-06)"
+              title="Alternar asistente de IA por voz y lenguaje natural"
             >
               <Sparkles size={14} color={isAiAssistantOpen ? '#000020' : '#e8c39e'} />
               <span className="dock-btn-label">Asistente IA</span>

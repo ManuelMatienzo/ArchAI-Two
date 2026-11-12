@@ -138,7 +138,7 @@ export const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
                   ? '#F59E0B'
                   : 'var(--text-muted)'
             }}
-            title="CU-03 · Estado del canal STOMP /topic/collab/{salaId}"
+            title="Estado del canal STOMP /topic/collab/{salaId}"
           >
             <Activity size={10} />
             {estadoConexion === 'conectado'

@@ -650,7 +650,7 @@ export const CodeGenerationDock: React.FC<CodeGenerationDockProps> = ({
               justifyContent: 'center',
               transition: 'all 0.15s ease'
             }}
-            title="Historial de generaciones (CU-10..CU-14)"
+            title="Historial de generaciones"
           >
             <History size={16} />
           </button>
@@ -1600,7 +1600,7 @@ export const CodeGenerationDock: React.FC<CodeGenerationDockProps> = ({
                 gap: '5px',
                 color: 'var(--accent-cyan)'
               }}
-              title="Importar un archivo XMI 2.1 y reconstruir el diagrama (CU-13)"
+              title="Importar un archivo XMI 2.1 y reconstruir el diagrama"
             >
               <Upload size={12} />
               <span>Importar XMI</span>
@@ -1866,17 +1866,6 @@ export const CodeGenerationDock: React.FC<CodeGenerationDockProps> = ({
                 color: 'var(--text-primary)'
               }}>
                 Historial de Generaciones
-              </span>
-              <span style={{
-                fontSize: '0.64rem',
-                fontWeight: 700,
-                padding: '2px 7px',
-                borderRadius: '6px',
-                background: 'rgba(6, 182, 212, 0.12)',
-                border: '1px solid rgba(6, 182, 212, 0.35)',
-                color: 'var(--accent-cyan)'
-              }}>
-                CU-10 … CU-14
               </span>
             </div>
 

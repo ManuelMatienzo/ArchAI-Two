@@ -985,7 +985,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     try {
       const n = await sincronizarColaOffline();
       setSaveInfo({ tipo: 'ok', texto: n > 0
-        ? `${n} operación(es) offline sincronizada(s) con la nube (CU-09).`
+        ? `${n} operación(es) offline sincronizada(s) con la nube.`
         : 'La cola offline está vacía: todo sincronizado.' });
     } catch (err: any) {
       setSaveInfo({ tipo: 'error', texto: err?.message || 'No se pudo sincronizar la cola offline.' });
@@ -1466,7 +1466,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     const payload = {...construirPayloadDiagrama(diagram, { creadorId: currentSession.currentUser.id }),...(diagramId?{id:diagramId}:{})};
     if (!online) {
       encolarOperacionOffline('guardar-diagrama', '/api/v1/diagramas', payload);
-      setSaveInfo({ tipo: 'ok', texto: 'Sin conexión: el diagrama se encoló y se sincronizará automáticamente (CU-09).' });
+      setSaveInfo({ tipo: 'ok', texto: 'Sin conexión: el diagrama se encoló y se sincronizará automáticamente.' });
       setGuardando(false);
       return;
     }
@@ -1628,7 +1628,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       const restaurado = await restaurarVersion(guardadoEn, versionId);
       setDiagram(diagramaDesdeBackend(restaurado));
       setShowVersionesModal(false);
-      setSaveInfo({ tipo: 'ok', texto: 'Versión restaurada en el lienzo (CU-05).' });
+      setSaveInfo({ tipo: 'ok', texto: 'Versión restaurada en el lienzo.' });
     } catch (err: any) {
       setSaveInfo({ tipo: 'error', texto: err?.message || 'No se pudo restaurar la versión.' });
     }
@@ -1649,7 +1649,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       setCurrentSession(sesionActualizada);
       localStorage.setItem('archai_session', JSON.stringify(sesionActualizada));
       setShowPerfilModal(false);
-      setSaveInfo({ tipo: 'ok', texto: 'Perfil actualizado en la nube (CU-01).' });
+      setSaveInfo({ tipo: 'ok', texto: 'Perfil actualizado en la nube.' });
     } catch (err: any) {
       setSaveInfo({ tipo: 'error', texto: err?.message || 'No se pudo actualizar el perfil.' });
     }
@@ -1865,7 +1865,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
                 diagram={diagram}
                 onImportarDiagrama={(d) => {
                   handleUpdateDiagram(d);
-                  setSaveInfo({ tipo: 'ok', texto: 'Diagrama reconstruido desde XMI (CU-13).' });
+                  setSaveInfo({ tipo: 'ok', texto: 'Diagrama reconstruido desde XMI.' });
                 }}
               />
             </Suspense>
@@ -2414,7 +2414,7 @@ const ModalGuardarNube: React.FC<ModalGuardarNubeProps> = ({
           lineHeight: 1.4
         }}>
           <CloudOff size={16} style={{ flexShrink: 0 }} />
-          <span>Modo offline activo (CU-09): el guardado se encola localmente y se sincroniza al restablecer conexión con el backend.</span>
+          <span>Modo offline activo: el guardado se encola localmente y se sincroniza al restablecer conexión con el backend.</span>
         </div>
       )}
     </div>
@@ -2446,7 +2446,7 @@ const ModalVersiones: React.FC<ModalVersionesProps> = ({
       isOpen={true}
       onClose={onCerrar}
       title="Historial de Versiones"
-      subtitle="Snapshots inmutables del modelo arquitectónico (CU-05)"
+      subtitle="Snapshots inmutables del modelo arquitectónico"
       icon={<History size={20} />}
       iconColor="#e8c39e"
       iconBg="rgba(232, 195, 158, 0.15)"
@@ -2648,7 +2648,7 @@ const ModalPerfilUsuario: React.FC<ModalPerfilUsuarioProps> = ({ usuario, onGuar
       isOpen={true}
       onClose={onCerrar}
       title="Mi Perfil de Ingeniero"
-      subtitle="Configura tu identidad colaborativa en tiempo real (CU-01)"
+      subtitle="Configura tu identidad colaborativa en tiempo real"
       icon={<UserCircle size={20} />}
       iconColor="#e8c39e"
       iconBg="rgba(232, 195, 158, 0.15)"

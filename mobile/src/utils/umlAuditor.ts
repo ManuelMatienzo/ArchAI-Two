@@ -84,7 +84,7 @@ export function auditUmlModelWithSnippet(
     const classCount = classes.length;
     const relCount = relationships.length;
     return {
-      content: `El subsistema de propuestas colaborativas de IA (CU-15 a CU-17) se encuentra activo en esta sala. El modelo actual consta de **${classCount} clases** y **${relCount} relaciones** sincronizadas. Las propuestas generadas desde la nube (Claude / Gemini) o cliente web son difundidas por STOMP e inspeccionables en el visor en Modo Viaje.`,
+      content: `El subsistema de propuestas colaborativas de IA se encuentra activo en esta sala. El modelo actual consta de **${classCount} clases** y **${relCount} relaciones** sincronizadas. Las propuestas generadas desde la nube (Claude / Gemini) o cliente web son difundidas por STOMP e inspeccionables en el visor en Modo Viaje.`,
     };
   }
 

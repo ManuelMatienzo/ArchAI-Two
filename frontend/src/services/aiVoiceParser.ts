@@ -257,7 +257,7 @@ export function parseNaturalLanguageCommand(text: string, existingClasses: Clase
       success: true,
       action: 'OPEN_WHITEBOARD',
       reasoning: 'Comando para escaneo de pizarra física OCR detectado.',
-      message: 'Abriendo escáner de pizarra física (CU-07)...'
+      message: 'Abriendo escáner de pizarra física...'
     };
   }
 
@@ -266,7 +266,7 @@ export function parseNaturalLanguageCommand(text: string, existingClasses: Clase
       success: true,
       action: 'OPEN_CODE_DOCK',
       reasoning: 'Comando para panel de generación de código Spring Boot detectado.',
-      message: 'Desplegando dock de generación de código y empaquetado ZIP (CU-10 / CU-14)...'
+      message: 'Desplegando dock de generación de código y empaquetado ZIP...'
     };
   }
 
@@ -357,7 +357,7 @@ export function parseNaturalLanguageCommand(text: string, existingClasses: Clase
       action: 'GENERATE_DIAGRAM',
       rawPrompt: clean,
       reasoning: 'Prompt descriptivo para sintetizar un diagrama completo por IA detectado.',
-      message: `Generando arquitectura completa desde el prompt: "${clean}" (CU-04)...`
+      message: `Generando arquitectura completa desde el prompt: "${clean}"...`
     };
   }
 

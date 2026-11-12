@@ -88,7 +88,7 @@ export const LeftNavRail: React.FC<LeftNavRailProps> = ({
         {/* Hub de Proyectos (CU-02) */}
         <button
           onClick={onOpenProjects}
-          title="Hub de Proyectos y Diagramas (CU-02)"
+          title="Hub de Proyectos y Diagramas"
           style={{
             width: '38px',
             height: '38px',

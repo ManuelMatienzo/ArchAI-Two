@@ -82,7 +82,7 @@ public class ServicioAgenteContextualIa {
 
         // Sugerencia de versionado (CU-05)
         if (!clases.isEmpty()) {
-            sugerencias.add("Utilice el botón 'Guardar en la nube' para persistir el modelo y crear versiones recuperables (CU-05).");
+            sugerencias.add("Utilice el botón 'Guardar en la nube' para persistir el modelo y crear versiones recuperables.");
         }
 
         // ── 2. Respuesta a la intención del usuario ──────────────────────────
@@ -143,7 +143,7 @@ public class ServicioAgenteContextualIa {
         accion = "DIAGNOSTICO";
         String respuesta = "Analicé el modelo en su contexto actual. " + resumenEstructura(clases, relaciones);
         if (alertas.isEmpty()) {
-            respuesta += " No se detectaron problemas estructurales. Puede continuar con la generación de código (CU-10 a CU-14).";
+            respuesta += " No se detectaron problemas estructurales. Puede continuar con la generación de código.";
         } else {
             respuesta += " Se detectaron " + alertas.size() + " advertencia(s) que conviene revisar.";
         }

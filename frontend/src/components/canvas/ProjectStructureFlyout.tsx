@@ -99,7 +99,7 @@ export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
       setNuevaDescripcion('');
       setCreandoProyecto(false);
       setProyectosAbiertos(prev => ({ ...prev, [nuevo.id]: true }));
-      onNotificar?.(`Proyecto '${nuevo.nombre}' creado en la nube (CU-02).`);
+      onNotificar?.(`Proyecto '${nuevo.nombre}' creado en la nube.`);
     } catch (err: any) {
       onNotificar?.(err?.message || 'No se pudo crear el proyecto.', 'error');
     }
@@ -122,7 +122,7 @@ export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
     try {
       const dto = await obtenerDiagrama(diagramaId);
       onCargarDiagrama?.(diagramaDesdeBackend(dto));
-      onNotificar?.('Diagrama cargado desde la nube (CU-02).');
+      onNotificar?.('Diagrama cargado desde la nube.');
       setActiveTab('structure');
     } catch (err: any) {
       onNotificar?.(err?.message || 'No se pudo cargar el diagrama.', 'error');
@@ -514,7 +514,7 @@ export const ProjectStructureFlyout: React.FC<ProjectStructureFlyoutProps> = ({
                       justifyContent: 'center',
                       gap: '5px'
                     }}
-                    title="Crear un nuevo proyecto de software (CU-02)"
+                    title="Crear un nuevo proyecto de software"
                   >
                     <Plus size={11} />
                     {creandoProyecto ? 'Cancelar' : 'Nuevo'}

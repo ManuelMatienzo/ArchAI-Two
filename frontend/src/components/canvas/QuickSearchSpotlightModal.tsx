@@ -303,7 +303,7 @@ export const QuickSearchSpotlightModal: React.FC<QuickSearchSpotlightModalProps>
       items.push({
         id: 'cmd-open-versions',
         kind: 'command',
-        title: 'Historial de Versiones (CU-05)',
+        title: 'Historial de Versiones',
         subtitle: 'Ver snapshots guardados, comparar cambios y restaurar versiones anteriores',
         badge: 'Versiones',
         badgeColor: '#10b981',

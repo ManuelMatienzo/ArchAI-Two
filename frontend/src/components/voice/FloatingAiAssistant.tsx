@@ -522,7 +522,7 @@ export const FloatingAiAssistant: React.FC<FloatingAiAssistantProps> = ({
       setMessages(prev => [...prev, {
         id: `ai-${Date.now()}`,
         sender: 'ai',
-        text: 'Escáner de pizarra física abierto (CU-07). Puedes capturar o cargar un boceto hecho a mano.',
+        text: 'Escáner de pizarra física abierto. Puedes capturar o cargar un boceto hecho a mano.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         tipoAccion: 'INFO'
       }]);
@@ -536,7 +536,7 @@ export const FloatingAiAssistant: React.FC<FloatingAiAssistantProps> = ({
       setMessages(prev => [...prev, {
         id: `ai-${Date.now()}`,
         sender: 'ai',
-        text: 'Panel de código Spring Boot abierto (CU-10 / CU-14). Aquí puedes ver y descargar entidades, repositorios y DDL SQL.',
+        text: 'Panel de código Spring Boot abierto. Aquí puedes ver y descargar entidades, repositorios y DDL SQL.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         tipoAccion: 'INFO'
       }]);

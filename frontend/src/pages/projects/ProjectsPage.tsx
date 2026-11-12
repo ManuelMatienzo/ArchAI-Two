@@ -686,7 +686,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
               borderRadius: '5px',
               letterSpacing: '0.04em'
             }}>
-              Hub de Proyectos · CU-02
+              Hub de Proyectos
             </span>
           </div>
         </div>
@@ -1497,7 +1497,7 @@ onOpenStudio(primerDiag?.data || obtenerDiagramaPorId(diagId, diagTitulo, { nomb
           setErrorNuevoProyecto(null);
         }}
         title="Crear Nuevo Proyecto"
-        subtitle="Gestor de Espacios de Trabajo · CU-02"
+        subtitle="Gestor de Espacios de Trabajo"
         icon={<Plus size={18} />}
         iconBg={isDark ? 'rgba(47, 44, 121, 0.60)' : '#171a4a'}
         iconColor="#e8c39e"
@@ -1641,7 +1641,7 @@ onOpenStudio(primerDiag?.data || obtenerDiagramaPorId(diagId, diagTitulo, { nomb
           setUnirseError(null);
         }}
         title="Unirse a un Proyecto"
-        subtitle="Acceso compartido por código · CU-02"
+        subtitle="Acceso compartido por código"
         icon={<KeyRound size={18} />}
         iconBg={isDark ? 'rgba(47, 44, 121, 0.60)' : '#171a4a'}
         iconColor="#e8c39e"
