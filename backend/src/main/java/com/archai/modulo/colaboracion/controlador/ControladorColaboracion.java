@@ -43,16 +43,33 @@ public class ControladorColaboracion {
         mensaje.setEmisorId(instance.startsWith(userId + "#") ? instance : userId);
         mensaje.setEmisorNombre(profile.getNombre());
         String diagram = servicioSalaColaborativa.diagramaId(salaId);
-        if (
-            diagram != null &&
-            !java.util.Set.of("cursor", "join", "leave", "salir", "solicitar_diagrama", "chat", "ia_request").contains(
-                String.valueOf(mensaje.getTipo())
-            ) &&
-            !revisiones.puedeEditar(diagram, userId)
-        ) throw new org.springframework.web.server.ResponseStatusException(
-            org.springframework.http.HttpStatus.FORBIDDEN,
-            "No tienes permiso para editar este diagrama."
-        );
+        boolean efimero = java.util.Set.of(
+            "cursor",
+            "nodo_mover",
+            "join",
+            "leave",
+            "salir",
+            "solicitar_diagrama",
+            "chat",
+            "ia_request"
+        ).contains(String.valueOf(mensaje.getTipo()));
+        if (diagram != null && !efimero) {
+            boolean puedeEditar;
+            try {
+                puedeEditar = revisiones.puedeEditar(diagram, userId);
+            } catch (org.springframework.web.server.ResponseStatusException ex) {
+                puedeEditar = false;
+            }
+            if (!puedeEditar) {
+                // Un commit de diagrama de un lector se descarta sin romper la conexión STOMP:
+                // lanzar el error aquí cerraba el canal y dejaba la sala sin tiempo real.
+                if ("diagrama".equalsIgnoreCase(mensaje.getTipo())) return;
+                throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    "No tienes permiso para editar este diagrama."
+                );
+            }
+        }
         if ("chat".equals(mensaje.getTipo())) {
             if (diagram == null) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.BAD_REQUEST,

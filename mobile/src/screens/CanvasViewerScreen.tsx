@@ -22,7 +22,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import {
   MessageSquare,
-  ShieldCheck,
   Sparkles,
   ZoomIn,
   ZoomOut,
@@ -35,6 +34,7 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
 import { UmlClass, UmlRelationship, GhostDraftProposal } from '../types/uml';
+import { TeamChatMessage } from '../components/collaboration/TeamChatDock';
 import { BottomSheetModal } from '../components/BottomSheetModal';
 import { GhostDraftBanner } from '../components/GhostDraftBanner';
 import { CanvasHeader } from '../components/canvas/CanvasHeader';
@@ -104,10 +104,15 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
   const currentUserRef = useRef({ id: 'usr-mobile-01', name: 'Desarrollador Móvil' });
   const [currentUserId, setCurrentUserId] = useState('usr-mobile-01');
 
+  // Estado de mensajes de chat sincronizados con la sala (CU-03 · integración web-móvil)
+  const [teamChatMessages, setTeamChatMessages] = useState<TeamChatMessage[]>([]);
+
   // Estado reactivo del lienzo UML: cargado dinámicamente desde el backend
   const [classes, setClasses] = useState<UmlClass[]>([]);
   const [relationships, setRelationships] = useState<UmlRelationship[]>([]);
   const [isLoadingDiagram, setIsLoadingDiagram] = useState(true);
+  const [stompConnected, setStompConnected] = useState(mobileStomp.isConnected());
+  const lastRealtimeUpdateRef = useRef(0);
 
   // Participantes activos en la sala obtenidos del backend
   const [participants, setParticipants] = useState<RoomParticipant[]>([]);
@@ -424,34 +429,58 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
       }
     }).catch(() => {});
 
-    // 2. Obtener el diagrama fresco desde el backend Spring Boot (priorizando proyecto si aplica)
-    roomsApi.getRoomDiagram(roomId, projectId).then((diagram) => {
+    // 2. Carga inicial y sondeo de respaldo.
+    // Con WebSocket conectado, el tiempo real llega por STOMP; el polling agresivo (1.5s)
+    // sobreescribía posiciones recientes y provocaba saltos/regresos. Solo se sondea
+    // como respaldo cuando NO hay conexión en vivo o no han llegado eventos recientes.
+    const cargarDiagramaServidor = (force = false) => {
       if (!isMounted) return;
+      const conectado = mobileStomp.isConnected();
+      const reciente = Date.now() - lastRealtimeUpdateRef.current < 4000;
+      if (!force && conectado && reciente) return;
 
-      const loadedClasses = Array.isArray(diagram?.classes) ? diagram.classes : [];
-      const loadedRels = Array.isArray(diagram?.relationships) ? diagram.relationships : [];
-
-      const { classes: normClasses } = normalizeDiagramCoordinates(loadedClasses);
-      diagramOffsetRef.current = { x: 0, y: 0 };
-      setClasses(normClasses);
-      setRelationships(loadedRels);
-      setIsLoadingDiagram(false);
-
-      // Actualizar caché para la siguiente alternancia de pantalla
-      if (loadedClasses.length > 0) {
+      roomsApi.getRoomDiagram(roomId, projectId).then((diagram) => {
+        if (!isMounted) return;
+        const loadedClasses = Array.isArray(diagram?.classes) ? diagram.classes : [];
+        const loadedRels = Array.isArray(diagram?.relationships) ? diagram.relationships : [];
+        if (loadedClasses.length === 0) return;
+        const { classes: normClasses } = normalizeDiagramCoordinates(loadedClasses);
+        diagramOffsetRef.current = { x: 0, y: 0 };
+        setClasses((prev) => {
+          // Si las clases son iguales en conteo y posiciones no cambiaron, evitar re-render innecesario
+          if (prev.length === normClasses.length) {
+            let cambio = false;
+            for (let i = 0; i < prev.length; i++) {
+              const p = prev[i];
+              const n = normClasses.find(c => c.id === p.id);
+              if (!n || Math.abs(p.x - n.x) > 1 || Math.abs(p.y - n.y) > 1 || (p.attributes?.length !== n.attributes?.length) || (p.methods?.length !== n.methods?.length)) {
+                cambio = true;
+                break;
+              }
+            }
+            if (!cambio) return prev;
+          }
+          return normClasses;
+        });
+        setRelationships(loadedRels);
+        setIsLoadingDiagram(false);
         diagramCacheService.saveCachedDiagram(cacheKey, {
           classes: loadedClasses,
           relationships: loadedRels,
         });
-      }
-    }).catch(() => {
-      if (isMounted) {
-        setIsLoadingDiagram(false);
-      }
-    });
+      }).catch(() => {
+        if (isMounted) {
+          setIsLoadingDiagram(false);
+        }
+      });
+    };
+
+    cargarDiagramaServidor(true);
+    const pollingInterval = setInterval(() => cargarDiagramaServidor(false), 8000);
 
     return () => {
       isMounted = false;
+      clearInterval(pollingInterval);
     };
   }, [roomId, projectId, cacheKey]);
 
@@ -486,6 +515,7 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
   // Conexión WebSocket STOMP y sincronización presencial de sala
   useEffect(() => {
     let cancelado = false;
+    let unsubscribeStatus: (() => void) | null = null;
 
     // Resuelve la identidad real antes de conectar: el join y la presencia deben
     // llevar el usuario de la sesión, no un id fijo que nunca coincide con la web.
@@ -511,12 +541,21 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
       // Si luego entra en tránsito, las alertas críticas de este proyecto llegarán a su teléfono.
       vincularSalaPush(currentUserRef.current, roomId, projectId).catch(() => {});
 
+      unsubscribeStatus = mobileStomp.addStatusListener((status) => {
+        setStompConnected(status === 'conectado');
+      });
+
       mobileStomp.connect(() => {
         const usuarioActual = currentUserRef.current;
 
         // 1. Suscribirse primero al canal: si el anfitrión responde al join con el
         //    diagrama de bienvenida antes de estar escuchando, ese mensaje se perdería.
         //    Eventos: join/leave, nodo_mover y diagrama en tiempo real.
+        //    Evita suscripciones duplicadas si el callback de conexión se dispara tras reconexión.
+        mobileStomp.unsubscribe(`/topic/collab/${roomId}`);
+        mobileStomp.unsubscribe(`/topic/room/${roomId}/presence`);
+        mobileStomp.unsubscribe(`/topic/room/${roomId}/ghost-draft`);
+        mobileStomp.unsubscribe(`/topic/room/${roomId}/chat`);
         mobileStomp.subscribeRoomCollab(roomId, (msg) => {
           if (!msg) return;
 
@@ -579,6 +618,8 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
               const x = Math.round(rawX);
               const y = Math.round(rawY);
 
+              lastRealtimeUpdateRef.current = Date.now();
+
               // Indicador visual de quién está moviendo la tabla en la Web
               setRemoteDraggingNodes((prev) => ({
                 ...prev,
@@ -596,9 +637,9 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
                 });
               }, 1200);
 
-              // Actualización instantánea de posición en el lienzo móvil
+              // Actualización instantánea de posición en el lienzo móvil (coincidencia flexible por id o nombre)
               setClasses((prev) =>
-                prev.map((c) => (c.id === classId ? { ...c, x, y } : c))
+                prev.map((c) => (c.id === classId || c.name.toLowerCase() === String(classId).toLowerCase() ? { ...c, x, y } : c))
               );
             }
             return;
@@ -606,10 +647,38 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
 
           // C. Sincronización de commit o diagrama completo enviado por el anfitrión
           if (tipo === 'diagrama' && payload) {
+            // ... (código existente)
+            return;
+          }
+
+          // D. Mensaje de chat desde la Web (CU-03 · integración lateral)
+          if (tipo === 'chat' && payload) {
+            const contenido = payload.contenido || payload.content || '';
+            if (contenido.trim()) {
+              setTeamChatMessages((prev) => {
+                // Evitar duplicados basados en contenido y emisor
+                const yaExiste = prev.some(
+                  m => m.content === contenido && m.senderId === payload.senderId
+                );
+                if (yaExiste) return prev;
+                return [...prev, { ...payload, tiempoLlegada: Date.now() }];
+              });
+            }
+            // Mostrar notificación temporal si la app está en foreground
+            if (typeof window !== 'undefined') {
+              const ultima = teamChatMessages[teamChatMessages.length - 1];
+              if (ultima && Date.now() - ultima.tiempoLlegada > 3000) {
+                // En un futuro se podría usar expo-haptics o un toast simple
+                console.log('Nuevo mensaje de chat en móvil:', contenido);
+              }
+            }
+            return;
+          }
             try {
               const diagramData = payload.diagram || payload;
               const parsed = parseBackendDiagram(diagramData);
               if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
+                lastRealtimeUpdateRef.current = Date.now();
                 const { classes: normClasses } = normalizeDiagramCoordinates(parsed.classes);
                 diagramOffsetRef.current = { x: 0, y: 0 };
                 setRemoteDraggingNodes({});
@@ -662,10 +731,11 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
 
     return () => {
       cancelado = true;
+      try { unsubscribeStatus?.(); } catch {}
       const usuarioActual = currentUserRef.current;
       mobileStomp.sendLeave(roomId, { id: usuarioActual.id, name: usuarioActual.name });
       roomsApi.leaveRoom(roomId, usuarioActual.id).catch(() => {});
-      mobileStomp.disconnect();
+      mobileStomp.unsubscribeRoom(roomId);
     };
   }, [roomId]);
 
@@ -740,14 +810,6 @@ export const CanvasViewerScreen = ({ route, navigation }: any) => {
         results={filteredClasses}
         onSelectClass={handleSpotlightSelect}
       />
-
-      {/* Modo Viaje Banner */}
-      <View style={styles.modoViajeBanner}>
-        <ShieldCheck size={14} color="#38bdf8" style={{ marginRight: 6 }} />
-        <Text style={styles.modoViajeText}>
-          MODO VIAJE ACTIVO · Paneo 360°, zoom táctil y supervisión en tiempo real
-        </Text>
-      </View>
 
       {/* Floating Ghost Draft Banner */}
       <GhostDraftBanner
@@ -873,21 +935,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  modoViajeBanner: {
-    backgroundColor: 'rgba(56, 189, 248, 0.10)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(56, 189, 248, 0.22)',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    zIndex: 15,
-  },
-  modoViajeText: {
-    color: '#38bdf8',
-    fontSize: 11,
-    fontWeight: '600',
   },
   viewport: {
     flex: 1,

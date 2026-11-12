@@ -71,6 +71,11 @@ public class ControladorEntradaSala {
             id,
             d.getProyecto() == null ? null : d.getProyecto().getId()
         );
+        // La sala se guarda normalizada ("ARC-VERIFI-7498"), pero el canal STOMP lo define el
+        // código de acceso del proyecto tal como lo usan la web y el móvil ("VERIFI-7498").
+        // Devolver la forma normalizada dejaba a cada cliente en un topic distinto y rompía
+        // la colaboración en tiempo real entre ambos.
+        session.setRoomId(pin);
         reviews.estado(pin, id, auth);
         broker.convertAndSend(
             "/topic/collab/" + pin,

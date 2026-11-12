@@ -467,8 +467,18 @@ public class ServicioRevisionPropuesta {
         );
         ObjectNode n = objeto(mapper.valueToTree(raw));
         if (!n.has("_reviewRevision")) {
-            emitir(room, "diagrama", e.official);
-            return e.official.deepCopy();
+            // Sin revisión previa: aceptar el nuevo diagrama como oficial y emitirlo.
+            // Antes se devolvía el official antiguo, lo que hacía que los cambios se "revertieran"
+            // al recibir el eco del STOMP.
+            n.put("_reviewRevision", e.revision);
+            e.official = n.deepCopy();
+            e.sequence++;
+            salas.actualizarDiagramaDeSala(room, n);
+            e.dirty = true;
+            e.checkpointDirty = true;
+            e.changedAt = System.currentTimeMillis();
+            emitir(room, "diagrama", n);
+            return n;
         }
         if (n.path("_reviewRevision").asLong(-1) != e.revision) {
             emitir(

@@ -53,9 +53,12 @@ export const conversationApi = {
       throw new Error(
         'La sala aún no tiene un diagrama guardado. Ábrelo desde la web o selecciona su proyecto.'
       );
+    // El roomId SIEMPRE debe viajar cuando se conoce: es el canal STOMP que comparten
+    // la web y el móvil. Si se omite, el backend deriva una sala aleatoria y cada
+    // cliente queda en un topic distinto (el tiempo real no cruza).
     return apiFetch('/colaboracion/salas/abrir', {
       method: 'POST',
-      body: JSON.stringify({ diagramId: id, ...(!projectId && room ? { roomId: room } : {}) }),
+      body: JSON.stringify({ diagramId: id, ...(room ? { roomId: room } : {}) }),
     });
   },
   state: (room: string, id: string) => apiFetch(chatPath(room, id, '/sesion')),

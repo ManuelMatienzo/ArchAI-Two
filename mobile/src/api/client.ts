@@ -46,10 +46,15 @@ export const getAutoDetectedHost = (): string => {
 };
 
 export const getDefaultBackendUrl = (): string => {
-  const configured=process.env.EXPO_PUBLIC_ARCHAI_API_URL;
-  if(configured)return configured.replace(/\/$/,'');
+  const configured = process.env.EXPO_PUBLIC_ARCHAI_API_URL;
+  if (configured) return configured.replace(/\/$/, '');
   const host = getAutoDetectedHost();
-  return `http://${host}:8000/api/v1`;
+  // En modo túnel de Expo, hostUri es algo como xxxx.exp.direct y no sirve para conectar al backend local.
+  // Usamos una IP por defecto configurable; el usuario puede cambiarla en los ajustes de la app
+  // o editar este archivo si su IP cambia al reiniciar el hotspot.
+  const DEFAULT_BACKEND_HOST = '192.168.0.144';
+  const finalHost = esHostDeTunel(host) ? DEFAULT_BACKEND_HOST : host;
+  return `http://${finalHost}:8000/api/v1`;
 };
 
 export const getBackendUrl = async (): Promise<string> => {
@@ -58,7 +63,8 @@ export const getBackendUrl = async (): Promise<string> => {
 
   if (customUrl) {
     // Una URL guardada apuntando a un túnel jamás alcanza el backend local: se descarta.
-    if (esHostDeTunel(extraerHost(customUrl))) {
+    const hostGuardado = extraerHost(customUrl);
+    if (esHostDeTunel(hostGuardado) || hostGuardado === '10.83.171.106') {
       const urlLimpia = getDefaultBackendUrl();
       await AsyncStorage.setItem('archai_backend_url', urlLimpia);
       return urlLimpia;

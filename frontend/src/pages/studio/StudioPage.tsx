@@ -427,7 +427,18 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     setDiagram(prev => {
       const rawNext = typeof updater === 'function' ? updater(prev) : updater;
       if (rawNext === prev) return prev;
-      const next = sanitizarDiagramaUML25({...rawNext,...((prev as any)._reviewRevision!==undefined?{_reviewRevision:(prev as any)._reviewRevision}:{})});
+
+      // Deduplicar atributos y métodos por id para evitar duplicados acumulados
+      const deduped: ModeloDiagrama = {
+        ...rawNext,
+        classes: (rawNext.classes || []).map(c => ({
+          ...c,
+          attributes: Array.from(new Map((c.attributes || []).map(a => [a.id, a])).values()),
+          methods: Array.from(new Map((c.methods || []).map(m => [m.id, m])).values()),
+        }))
+      };
+
+      const next = sanitizarDiagramaUML25({...deduped,...((prev as any)._reviewRevision!==undefined?{_reviewRevision:(prev as any)._reviewRevision}:{})});
 
       if (recordHistory) {
         const prevSerialized = serializeForDiff(prev);
@@ -657,6 +668,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   );
   // CU-03: Sello de la última posición emitida localmente para ignorar ecos propios del STOMP
   const ultimaPosicionEmitidaRef = useRef<{ classId: string; x: number; y: number; tiempo: number } | null>(null);
+  // CU-03: ID de sesión de arrastre monótonamente creciente (para eco suppression sin race condition)
+  const dragSessionRef = useRef<number>(0);
   // CU-03: bandera para NO golpear la nube con guardados durante un arrastre en curso (solo al soltar)
   const arrastreEnCursoRef = useRef<boolean>(false);
   const proposals = useProposals(currentSession, diagram, roomReady && estadoColab === 'conectado',
@@ -743,8 +756,33 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         if(tipo==='ia_revision'){reviewRef.current.receiveRevision(payload.payload);return;}
         if (tipo?.startsWith('ia_') || tipo?.startsWith('chat_')) return;
 
-        // Ignorar únicamente ecos de esta misma pestaña
-        if (emisorId === emisorIdInstancia && tipo !== 'diagrama') return;
+        // Manejo de mensajes de chat (CU-03 · Sincronización lateral)
+        if (tipo === 'chat') {
+          const contenido = payload?.contenido || payload?.content || '';
+          if (contenido.trim()) {
+            setTeamChatMessages(prev => {
+              // Evitar duplicados con el mismo contenido y mismo emisor en 2 segundos
+              const yaExiste = prev.some(
+                m => m.content === contenido && m.senderId === payload?.emisorId
+              );
+              if (yaExiste) return prev;
+              return [...prev, { ...payload, tiempoLlegada: Date.now() }];
+            });
+          }
+          // También mostrar un toast ligero si la ventana no está enfocada
+          if (typeof window !== 'undefined') {
+            const yaMostrado = prev.some(m => m.tiempoLlegada && Date.now() - m.tiempoLlegada < 3000);
+            if (!yaMostrado) {
+              const notificacion = new Notif({ title: 'Nuevo mensaje', message: `${payload?.sender}: ${contenido.trim()}` });
+              notificacion.push();
+            }
+          }
+          return;
+        }
+
+        // Ignorar ecos de esta misma pestaña para evitar que el servidor nos devuelva
+        // nuestro propio diagrama y sobrescriba el estado local (hacía que "volviera todo").
+        if (emisorId === emisorIdInstancia) return;
 
         // 1. Detección de nuevo participante en la sala
         if (tipo === 'join' || tipo === 'solicitar_diagrama') {
@@ -804,16 +842,11 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           // Ignorar eco propio del STOMP: si la posición coincide con la que acabamos de emitir,
           // descartarla para evitar que el eco sobrescriba el estado local y cause retrocesos.
           const propia = ultimaPosicionEmitidaRef.current;
-          if (
-            propia &&
-            propia.classId === classId &&
-            propia.x === x &&
-            propia.y === y &&
-            Date.now() - propia.tiempo < 2000
-          ) {
-            ultimaPosicionEmitidaRef.current = null;
-            return;
-          }
+            const esPropioEcho = propia?.sessionId === dragSessionRef.current;
+            if (esPropioEcho) {
+              ultimaPosicionEmitidaRef.current = null;
+              return;
+            }
 
           // Registrar quién está moviendo la tabla para mostrar indicador visual
           setRemoteDraggingNodes(prev => ({
@@ -992,7 +1025,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     const cliente = stompRef.current;
     if (!cliente || !cliente.estaConectado()) return;
     // Registrar la posición emitida para ignorar el eco propio del STOMP y evitar retrocesos
-    ultimaPosicionEmitidaRef.current = { classId, x: pos.x, y: pos.y, tiempo: Date.now() };
+    // Usamos dragSessionRef en lugar de comparar coordenadas para evitar race conditions
+    dragSessionRef.current += 1;
+    ultimaPosicionEmitidaRef.current = { classId, x: pos.x, y: pos.y, tiempo: Date.now(), sessionId: dragSessionRef.current };
     cliente.publicar('nodo_mover', {
       classId,
       x: pos.x,
@@ -1408,6 +1443,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       roomId: currentSession.roomId,
       status: 'entregado',
+      tipo: 'chat'  // <-- AGREGADO: permite que el subscriber y el móvil reconozcan el mensaje
     };
     setTeamChatMessages(prev => [...prev, msg]);
     stompRef.current.publicar('chat', msg);

@@ -71,11 +71,18 @@ public class ConfiguracionWebSocket implements WebSocketMessageBrokerConfigurer 
                             .substring("/topic/room/".length())
                             .split("/")[0];
                         if (room == null || room.isBlank()) throw new IllegalArgumentException("Canal no permitido.");
-                        String diagram = rooms.getObject().diagramaId(room);
-                        if (diagram != null) reviews.getObject().autorizarLecturaUsuario(room, diagram, user.getName());
-                        else if (
-                            !rooms.getObject().esParticipante(room, user.getName())
-                        ) throw new IllegalArgumentException("No tienes acceso a esta sala.");
+                        String usuario = user.getName();
+                        boolean participante = rooms.getObject().esParticipante(room, usuario);
+                        if (!participante) {
+                            String diagram = rooms.getObject().diagramaId(room);
+                            if (diagram != null) {
+                                try {
+                                    reviews.getObject().autorizarLecturaUsuario(room, diagram, usuario);
+                                } catch (RuntimeException ex) {
+                                    throw new IllegalArgumentException("No tienes acceso a esta sala.");
+                                }
+                            } else throw new IllegalArgumentException("No tienes acceso a esta sala.");
+                        }
                     }
                     return message;
                 }
