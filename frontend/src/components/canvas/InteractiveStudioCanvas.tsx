@@ -2720,6 +2720,29 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       tgtSideBuckets.get(tgtKey)!.push(rel.id);
     });
 
+    // Ordenar los puertos en cada bucket para que las líneas que llegan o salen de la misma cara no se crucen:
+    // Para caras verticales (LEFT/RIGHT), ordenar por Y del otro extremo.
+    // Para caras horizontales (TOP/BOTTOM), ordenar por X del otro extremo.
+    tgtSideBuckets.forEach((relIds, tgtKey) => {
+      const isVerticalFace = tgtKey.endsWith('_LEFT') || tgtKey.endsWith('_RIGHT');
+      relIds.sort((idA, idB) => {
+        const metaA = relMetas.find(m => m.rel.id === idA);
+        const metaB = relMetas.find(m => m.rel.id === idB);
+        if (!metaA || !metaB) return 0;
+        return isVerticalFace ? metaA.src.cy - metaB.src.cy : metaA.src.cx - metaB.src.cx;
+      });
+    });
+
+    srcSideBuckets.forEach((relIds, srcKey) => {
+      const isVerticalFace = srcKey.endsWith('_LEFT') || srcKey.endsWith('_RIGHT');
+      relIds.sort((idA, idB) => {
+        const metaA = relMetas.find(m => m.rel.id === idA);
+        const metaB = relMetas.find(m => m.rel.id === idB);
+        if (!metaA || !metaB) return 0;
+        return isVerticalFace ? metaA.tgt.cy - metaB.tgt.cy : metaA.tgt.cx - metaB.tgt.cx;
+      });
+    });
+
     return relMetas.map(({ rel, src, tgt, srcSide, tgtSide, isSelf }) => {
       if (isSelf) {
         const startX = src.x + src.w;
@@ -2750,21 +2773,31 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           endY,
           midX,
           midY,
-          srcMultX: startX + 10,
+          srcMultX: startX + 14,
           srcMultY: startY + 16,
-          tgtMultX: endX - 10,
+          tgtMultX: endX - 14,
           tgtMultY: endY - 14
         };
       }
       const srcKey = `${rel.sourceClassId}_${srcSide}`;
       const srcList = srcSideBuckets.get(srcKey) || [rel.id];
       const srcIdx = srcList.indexOf(rel.id);
-      const srcOffset = srcList.length > 1 ? (srcIdx - (srcList.length - 1) / 2) * 22 : 0;
+      const srcSpread = srcList.length > 1
+        ? Math.min(46, Math.max(30, (src.h - 80) / srcList.length))
+        : 0;
+      const srcOffset = srcList.length > 1
+        ? (srcIdx - (srcList.length - 1) / 2) * srcSpread
+        : 0;
 
       const tgtKey = `${rel.targetClassId}_${tgtSide}`;
       const tgtList = tgtSideBuckets.get(tgtKey) || [rel.id];
       const tgtIdx = tgtList.indexOf(rel.id);
-      const tgtOffset = tgtList.length > 1 ? (tgtIdx - (tgtList.length - 1) / 2) * 22 : 0;
+      const tgtSpread = tgtList.length > 1
+        ? Math.min(46, Math.max(30, (tgt.h - 80) / tgtList.length))
+        : 0;
+      const tgtOffset = tgtList.length > 1
+        ? (tgtIdx - (tgtList.length - 1) / 2) * tgtSpread
+        : 0;
 
       let startX = src.cx;
       let startY = src.cy;
@@ -2776,37 +2809,37 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         startX = src.x + src.w;
         const overlapTop = Math.max(src.y, tgt.y);
         const overlapBottom = Math.min(src.y + src.h, tgt.y + tgt.h);
-        if (overlapBottom - overlapTop > 24) {
-          startY = (overlapTop + overlapBottom) / 2 + srcOffset;
+        if (overlapBottom - overlapTop > 32 && srcList.length === 1 && tgtList.length === 1) {
+          startY = (overlapTop + overlapBottom) / 2;
         } else {
-          startY = Math.max(src.y + 40, Math.min(src.y + src.h - 40, src.cy)) + srcOffset;
+          startY = Math.max(src.y + 36, Math.min(src.y + src.h - 36, src.cy + srcOffset));
         }
       } else if (srcSide === 'LEFT') {
         startX = src.x;
         const overlapTop = Math.max(src.y, tgt.y);
         const overlapBottom = Math.min(src.y + src.h, tgt.y + tgt.h);
-        if (overlapBottom - overlapTop > 24) {
-          startY = (overlapTop + overlapBottom) / 2 + srcOffset;
+        if (overlapBottom - overlapTop > 32 && srcList.length === 1 && tgtList.length === 1) {
+          startY = (overlapTop + overlapBottom) / 2;
         } else {
-          startY = Math.max(src.y + 40, Math.min(src.y + src.h - 40, src.cy)) + srcOffset;
+          startY = Math.max(src.y + 36, Math.min(src.y + src.h - 36, src.cy + srcOffset));
         }
       } else if (srcSide === 'BOTTOM') {
         startY = src.y + src.h;
         const overlapLeft = Math.max(src.x, tgt.x);
         const overlapRight = Math.min(src.x + src.w, tgt.x + tgt.w);
-        if (overlapRight - overlapLeft > 24) {
-          startX = (overlapLeft + overlapRight) / 2 + srcOffset;
+        if (overlapRight - overlapLeft > 32 && srcList.length === 1 && tgtList.length === 1) {
+          startX = (overlapLeft + overlapRight) / 2;
         } else {
-          startX = Math.max(src.x + 40, Math.min(src.x + src.w - 40, src.cx)) + srcOffset;
+          startX = Math.max(src.x + 36, Math.min(src.x + src.w - 36, src.cx + srcOffset));
         }
       } else if (srcSide === 'TOP') {
         startY = src.y;
         const overlapLeft = Math.max(src.x, tgt.x);
         const overlapRight = Math.min(src.x + src.w, tgt.x + tgt.w);
-        if (overlapRight - overlapLeft > 24) {
-          startX = (overlapLeft + overlapRight) / 2 + srcOffset;
+        if (overlapRight - overlapLeft > 32 && srcList.length === 1 && tgtList.length === 1) {
+          startX = (overlapLeft + overlapRight) / 2;
         } else {
-          startX = Math.max(src.x + 40, Math.min(src.x + src.w - 40, src.cx)) + srcOffset;
+          startX = Math.max(src.x + 36, Math.min(src.x + src.w - 36, src.cx + srcOffset));
         }
       }
 
@@ -2815,47 +2848,74 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         endX = tgt.x;
         const overlapTop = Math.max(src.y, tgt.y);
         const overlapBottom = Math.min(src.y + src.h, tgt.y + tgt.h);
-        if (overlapBottom - overlapTop > 24 && srcSide === 'RIGHT') {
+        if (overlapBottom - overlapTop > 32 && srcSide === 'RIGHT' && srcList.length === 1 && tgtList.length === 1) {
           endY = startY;
         } else {
-          endY = Math.max(tgt.y + 40, Math.min(tgt.y + tgt.h - 40, tgt.cy)) + tgtOffset;
+          endY = Math.max(tgt.y + 36, Math.min(tgt.y + tgt.h - 36, tgt.cy + tgtOffset));
         }
       } else if (tgtSide === 'RIGHT') {
         endX = tgt.x + tgt.w;
         const overlapTop = Math.max(src.y, tgt.y);
         const overlapBottom = Math.min(src.y + src.h, tgt.y + tgt.h);
-        if (overlapBottom - overlapTop > 24 && srcSide === 'LEFT') {
+        if (overlapBottom - overlapTop > 32 && srcSide === 'LEFT' && srcList.length === 1 && tgtList.length === 1) {
           endY = startY;
         } else {
-          endY = Math.max(tgt.y + 40, Math.min(tgt.y + tgt.h - 40, tgt.cy)) + tgtOffset;
+          endY = Math.max(tgt.y + 36, Math.min(tgt.y + tgt.h - 36, tgt.cy + tgtOffset));
         }
       } else if (tgtSide === 'TOP') {
         endY = tgt.y;
         const overlapLeft = Math.max(src.x, tgt.x);
         const overlapRight = Math.min(src.x + src.w, tgt.x + tgt.w);
-        if (overlapRight - overlapLeft > 24 && srcSide === 'BOTTOM') {
+        if (overlapRight - overlapLeft > 32 && srcSide === 'BOTTOM' && srcList.length === 1 && tgtList.length === 1) {
           endX = startX;
         } else {
-          endX = Math.max(tgt.x + 40, Math.min(tgt.x + tgt.w - 40, tgt.cx)) + tgtOffset;
+          endX = Math.max(tgt.x + 36, Math.min(tgt.x + tgt.w - 36, tgt.cx + tgtOffset));
         }
       } else if (tgtSide === 'BOTTOM') {
         endY = tgt.y + tgt.h;
         const overlapLeft = Math.max(src.x, tgt.x);
         const overlapRight = Math.min(src.x + src.w, tgt.x + tgt.w);
-        if (overlapRight - overlapLeft > 24 && srcSide === 'TOP') {
+        if (overlapRight - overlapLeft > 32 && srcSide === 'TOP' && srcList.length === 1 && tgtList.length === 1) {
           endX = startX;
         } else {
-          endX = Math.max(tgt.x + 40, Math.min(tgt.x + tgt.w - 40, tgt.cx)) + tgtOffset;
+          endX = Math.max(tgt.x + 36, Math.min(tgt.x + tgt.w - 36, tgt.cx + tgtOffset));
         }
       }
 
+      // Detección de obstáculos (otras tarjetas que se interponen en el trayecto directo)
+      const findObstacles = (sX: number, sY: number, eX: number, eY: number, isHoriz: boolean) => {
+        const obstacles: { x: number; y: number; w: number; h: number }[] = [];
+        const minX = Math.min(sX, eX);
+        const maxX = Math.max(sX, eX);
+        const minY = Math.min(sY, eY);
+        const maxY = Math.max(sY, eY);
+
+        classMap.forEach((box, id) => {
+          if (id === rel.sourceClassId || id === rel.targetClassId) return;
+          if (isHoriz) {
+            const inHorizRange = box.x + box.w > minX + 20 && box.x < maxX - 20;
+            const inVertRange = !(maxY < box.y - 16 || minY > box.y + box.h + 16);
+            if (inHorizRange && inVertRange) {
+              obstacles.push(box);
+            }
+          } else {
+            const inVertRange = box.y + box.h > minY + 20 && box.y < maxY - 20;
+            const inHorizRange = !(maxX < box.x - 16 || minX > box.x + box.w + 16);
+            if (inVertRange && inHorizRange) {
+              obstacles.push(box);
+            }
+          }
+        });
+        return obstacles;
+      };
+
       // Líneas ortogonales UML 2.5: solo segmentos rectos con ángulos de 90°
-      // (sin curvas Bézier). Un solo escalón intermedio cuando hay desnivel.
+      // (sin curvas Bézier). Evasión de obstáculos intermedios y separación por carril.
       const orthogonalPath = (
         sX: number, sY: number, eX: number, eY: number,
-        sSide: AnchorSide, tSide: AnchorSide
+        sSide: AnchorSide, tSide: AnchorSide,
+        laneOffset: number = 0
       ): { pathD: string; midX: number; midY: number } => {
-        // Puntos intermedios para el escalón (mitad del trayecto dominante)
         const midX = (sX + eX) / 2;
         const midY = (sY + eY) / 2;
 
@@ -2865,90 +2925,171 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
         // Casos opuestos horizontales: RIGHT->LEFT o LEFT->RIGHT
         if ((sSide === 'RIGHT' && tSide === 'LEFT') || (sSide === 'LEFT' && tSide === 'RIGHT')) {
-          if (Math.abs(sY - eY) < 2) {
-            // Misma altura: línea recta horizontal
+          const obstacles = findObstacles(sX, sY, eX, eY, true);
+
+          if (obstacles.length > 0) {
+            // Evasión de obstáculo intermedio (ej. BankAccount entre WalletController y TransferService)
+            const obsTop = Math.min(...obstacles.map(o => o.y));
+            const obsBottom = Math.max(...obstacles.map(o => o.y + o.h));
+            const obsLeft = Math.min(...obstacles.map(o => o.x));
+            const obsRight = Math.max(...obstacles.map(o => o.x + o.w));
+
+            const distBottom = Math.abs(sY - obsBottom) + Math.abs(eY - obsBottom);
+            const distTop = Math.abs(sY - obsTop) + Math.abs(eY - obsTop);
+            const routeUnder = distBottom <= distTop;
+
+            const bypassY = routeUnder
+              ? obsBottom + 30 + Math.abs(laneOffset)
+              : obsTop - 30 - Math.abs(laneOffset);
+
+            if (sSide === 'RIGHT') {
+              const turn1X = Math.max(sX + 24, Math.min(sX + 36, (sX + obsLeft) / 2));
+              const turn2X = Math.min(eX - 24, Math.max(eX - 36, (obsRight + eX) / 2));
+              pathD = `M ${sX} ${sY} L ${turn1X} ${sY} L ${turn1X} ${bypassY} L ${turn2X} ${bypassY} L ${turn2X} ${eY} L ${eX} ${eY}`;
+              labelMidX = (turn1X + turn2X) / 2;
+              labelMidY = bypassY;
+            } else {
+              const turn1X = Math.min(sX - 24, Math.max(sX - 36, (sX + obsRight) / 2));
+              const turn2X = Math.max(eX + 24, Math.min(eX + 36, (obsLeft + eX) / 2));
+              pathD = `M ${sX} ${sY} L ${turn1X} ${sY} L ${turn1X} ${bypassY} L ${turn2X} ${bypassY} L ${turn2X} ${eY} L ${eX} ${eY}`;
+              labelMidX = (turn1X + turn2X) / 2;
+              labelMidY = bypassY;
+            }
+          } else if (Math.abs(sY - eY) < 3 && srcList.length === 1 && tgtList.length === 1) {
+            // Misma altura sin obstáculos: línea recta horizontal
             pathD = `M ${sX} ${sY} L ${eX} ${eY}`;
             labelMidX = midX;
             labelMidY = sY;
           } else {
             // Escalón: horizontal -> vertical -> horizontal en punto medio X
-            pathD = `M ${sX} ${sY} L ${midX} ${sY} L ${midX} ${eY} L ${eX} ${eY}`;
-            labelMidX = midX;
+            const stepX = midX + laneOffset;
+            pathD = `M ${sX} ${sY} L ${stepX} ${sY} L ${stepX} ${eY} L ${eX} ${eY}`;
+            labelMidX = stepX;
             labelMidY = (sY + eY) / 2;
           }
         }
         // Casos opuestos verticales: BOTTOM->TOP o TOP->BOTTOM
         else if ((sSide === 'BOTTOM' && tSide === 'TOP') || (sSide === 'TOP' && tSide === 'BOTTOM')) {
-          if (Math.abs(sX - eX) < 2) {
-            // Misma vertical: línea recta vertical
+          const obstacles = findObstacles(sX, sY, eX, eY, false);
+
+          if (obstacles.length > 0) {
+            // Evasión de obstáculo vertical por izquierda o derecha
+            const obsLeft = Math.min(...obstacles.map(o => o.x));
+            const obsRight = Math.max(...obstacles.map(o => o.x + o.w));
+            const obsTop = Math.min(...obstacles.map(o => o.y));
+            const obsBottom = Math.max(...obstacles.map(o => o.y + o.h));
+
+            const distRight = Math.abs(sX - obsRight) + Math.abs(eX - obsRight);
+            const distLeft = Math.abs(sX - obsLeft) + Math.abs(eX - obsLeft);
+            const routeRight = distRight <= distLeft;
+
+            const bypassX = routeRight
+              ? obsRight + 30 + Math.abs(laneOffset)
+              : obsLeft - 30 - Math.abs(laneOffset);
+
+            if (sSide === 'BOTTOM') {
+              const turn1Y = Math.max(sY + 24, Math.min(sY + 36, (sY + obsTop) / 2));
+              const turn2Y = Math.min(eY - 24, Math.max(eY - 36, (obsBottom + eY) / 2));
+              pathD = `M ${sX} ${sY} L ${sX} ${turn1Y} L ${bypassX} ${turn1Y} L ${bypassX} ${turn2Y} L ${eX} ${turn2Y} L ${eX} ${eY}`;
+              labelMidX = bypassX;
+              labelMidY = (turn1Y + turn2Y) / 2;
+            } else {
+              const turn1Y = Math.min(sY - 24, Math.max(sY - 36, (sY + obsBottom) / 2));
+              const turn2Y = Math.max(eY + 24, Math.min(eY + 36, (obsTop + eY) / 2));
+              pathD = `M ${sX} ${sY} L ${sX} ${turn1Y} L ${bypassX} ${turn1Y} L ${bypassX} ${turn2Y} L ${eX} ${turn2Y} L ${eX} ${eY}`;
+              labelMidX = bypassX;
+              labelMidY = (turn1Y + turn2Y) / 2;
+            }
+          } else if (Math.abs(sX - eX) < 3 && srcList.length === 1 && tgtList.length === 1) {
+            // Misma vertical sin obstáculos: línea recta vertical
             pathD = `M ${sX} ${sY} L ${eX} ${eY}`;
             labelMidX = sX;
             labelMidY = midY;
           } else {
             // Escalón: vertical -> horizontal -> vertical en punto medio Y
-            pathD = `M ${sX} ${sY} L ${sX} ${midY} L ${eX} ${midY} L ${eX} ${eY}`;
+            const stepY = midY + laneOffset;
+            pathD = `M ${sX} ${sY} L ${sX} ${stepY} L ${eX} ${stepY} L ${eX} ${eY}`;
             labelMidX = (sX + eX) / 2;
-            labelMidY = midY;
+            labelMidY = stepY;
           }
         }
-        // Lados adyacentes: giro en L con un solo ángulo de 90°
-        else {
-          // Elegir el punto de giro que minimice el trazado: ir primero en la dirección del origen
-          let cornerX: number, cornerY: number;
-          if (sSide === 'RIGHT' || sSide === 'LEFT') {
-            // Salir horizontalmente del origen, luego girar verticalmente hacia el destino
-            cornerX = eX;
-            cornerY = sY;
-            // Si el punto de giro cae dentro del destino, ajustar para no entrar en la caja
-            if (tSide === 'TOP' || tSide === 'BOTTOM') {
-              cornerX = sSide === 'RIGHT' ? Math.min(eX, sX + Math.abs(eX - sX) * 0.5) : Math.max(eX, sX - Math.abs(eX - sX) * 0.5);
-            }
+        // Mismo lado (ej. RIGHT->RIGHT, LEFT->LEFT)
+        else if (sSide === tSide) {
+          if (sSide === 'RIGHT') {
+            const exitX = Math.max(sX, eX) + 32 + Math.abs(laneOffset);
+            pathD = `M ${sX} ${sY} L ${exitX} ${sY} L ${exitX} ${eY} L ${eX} ${eY}`;
+            labelMidX = exitX;
+            labelMidY = (sY + eY) / 2;
+          } else if (sSide === 'LEFT') {
+            const exitX = Math.min(sX, eX) - 32 - Math.abs(laneOffset);
+            pathD = `M ${sX} ${sY} L ${exitX} ${sY} L ${exitX} ${eY} L ${eX} ${eY}`;
+            labelMidX = exitX;
+            labelMidY = (sY + eY) / 2;
+          } else if (sSide === 'BOTTOM') {
+            const exitY = Math.max(sY, eY) + 32 + Math.abs(laneOffset);
+            pathD = `M ${sX} ${sY} L ${sX} ${exitY} L ${eX} ${exitY} L ${eX} ${eY}`;
+            labelMidX = (sX + eX) / 2;
+            labelMidY = exitY;
           } else {
-            // Salir verticalmente del origen, luego girar horizontalmente hacia el destino
-            cornerX = sX;
-            cornerY = eY;
+            const exitY = Math.min(sY, eY) - 32 - Math.abs(laneOffset);
+            pathD = `M ${sX} ${sY} L ${sX} ${exitY} L ${eX} ${exitY} L ${eX} ${eY}`;
+            labelMidX = (sX + eX) / 2;
+            labelMidY = exitY;
           }
-          pathD = `M ${sX} ${sY} L ${cornerX} ${cornerY} L ${eX} ${eY}`;
-          labelMidX = (sX + cornerX + eX) / 3;
-          labelMidY = (sY + cornerY + eY) / 3;
+        }
+        // Lados adyacentes perpendiculares: giro en L de 90°
+        else {
+          if (sSide === 'RIGHT' || sSide === 'LEFT') {
+            pathD = `M ${sX} ${sY} L ${eX} ${sY} L ${eX} ${eY}`;
+            labelMidX = (sX + eX) / 2;
+            labelMidY = sY;
+          } else {
+            pathD = `M ${sX} ${sY} L ${sX} ${eY} L ${eX} ${eY}`;
+            labelMidX = sX;
+            labelMidY = (sY + eY) / 2;
+          }
         }
 
         return { pathD, midX: labelMidX, midY: labelMidY };
       };
 
-      const { pathD, midX, midY } = orthogonalPath(startX, startY, endX, endY, srcSide, tgtSide);
+      const laneOffset = (srcIdx - (srcList.length - 1) / 2) * 24 + (tgtIdx - (tgtList.length - 1) / 2) * 12;
+      const { pathD, midX, midY } = orthogonalPath(startX, startY, endX, endY, srcSide, tgtSide, laneOffset);
 
-      // Multiplicidad en coordenadas seguras exteriores (fuera de las cajas de clase)
+      // Multiplicidad en coordenadas seguras exteriores (fuera de las cajas de clase y sin tapar marcadores)
+      const srcBadgeW = Math.max(18, (rel.sourceMultiplicity || '1').length * 7.5 + 8);
+      const tgtBadgeW = Math.max(18, (rel.targetMultiplicity || '*').length * 7.5 + 8);
+
       let srcMultX = startX;
       let srcMultY = startY;
       if (srcSide === 'RIGHT') {
-        srcMultX = startX + 10;
-        srcMultY = startY - 8;
+        srcMultX = startX + 16;
+        srcMultY = startY - 14;
       } else if (srcSide === 'LEFT') {
-        srcMultX = startX - 22;
-        srcMultY = startY - 8;
+        srcMultX = startX - srcBadgeW - 12;
+        srcMultY = startY - 14;
       } else if (srcSide === 'BOTTOM') {
-        srcMultX = startX + 10;
-        srcMultY = startY + 16;
+        srcMultX = startX + 12;
+        srcMultY = startY + 22;
       } else if (srcSide === 'TOP') {
-        srcMultX = startX + 10;
-        srcMultY = startY - 10;
+        srcMultX = startX + 12;
+        srcMultY = startY - 20;
       }
 
       let tgtMultX = endX;
       let tgtMultY = endY;
       if (tgtSide === 'LEFT') {
-        tgtMultX = endX - 22;
-        tgtMultY = endY - 8;
+        tgtMultX = endX - tgtBadgeW - 14;
+        tgtMultY = endY - 14;
       } else if (tgtSide === 'RIGHT') {
-        tgtMultX = endX + 10;
-        tgtMultY = endY - 8;
+        tgtMultX = endX + 18;
+        tgtMultY = endY - 14;
       } else if (tgtSide === 'TOP') {
-        tgtMultX = endX + 10;
-        tgtMultY = endY - 10;
+        tgtMultX = endX + 14;
+        tgtMultY = endY - 22;
       } else if (tgtSide === 'BOTTOM') {
-        tgtMultX = endX + 10;
-        tgtMultY = endY + 16;
+        tgtMultX = endX + 14;
+        tgtMultY = endY + 22;
       }
 
       // UML 2.5: CÃ¡lculo del conector punteado para la Clase Asociativa

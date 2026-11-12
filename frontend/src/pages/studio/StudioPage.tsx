@@ -655,6 +655,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const miInstanciaIdRef = useRef<string>(
     'tab-' + Math.random().toString(36).slice(2, 8) + '-' + Date.now().toString(36)
   );
+  // CU-03: Sello de la última posición emitida localmente para ignorar ecos propios del STOMP
+  const ultimaPosicionEmitidaRef = useRef<{ classId: string; x: number; y: number; tiempo: number } | null>(null);
   // CU-03: bandera para NO golpear la nube con guardados durante un arrastre en curso (solo al soltar)
   const arrastreEnCursoRef = useRef<boolean>(false);
   const proposals = useProposals(currentSession, diagram, roomReady && estadoColab === 'conectado',
@@ -799,6 +801,20 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           const nombre = payload.emisorNombre || 'Colaborador';
           const color = datos.color || '#2f2c79';
 
+          // Ignorar eco propio del STOMP: si la posición coincide con la que acabamos de emitir,
+          // descartarla para evitar que el eco sobrescriba el estado local y cause retrocesos.
+          const propia = ultimaPosicionEmitidaRef.current;
+          if (
+            propia &&
+            propia.classId === classId &&
+            propia.x === x &&
+            propia.y === y &&
+            Date.now() - propia.tiempo < 2000
+          ) {
+            ultimaPosicionEmitidaRef.current = null;
+            return;
+          }
+
           // Registrar quién está moviendo la tabla para mostrar indicador visual
           setRemoteDraggingNodes(prev => ({
             ...prev,
@@ -839,6 +855,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({
 
         // 4. Recepción de diagrama modificado por un compañero (commit final)
         if (tipo === 'diagrama') {
+          // Ignorar eco propio: ya aplicamos la posición localmente al soltar el clic.
+          // Aplicar el eco propio podría sobrescribir con un payload ligeramente distinto y causar retrocesos.
+          if (emisorId === emisorIdInstancia) return;
           const datos = payload?.payload;
           if (!datos || typeof datos !== 'object') return;
           try {
@@ -972,6 +991,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const manejarNodeDrag = (classId: string, pos: { x: number; y: number }) => {
     const cliente = stompRef.current;
     if (!cliente || !cliente.estaConectado()) return;
+    // Registrar la posición emitida para ignorar el eco propio del STOMP y evitar retrocesos
+    ultimaPosicionEmitidaRef.current = { classId, x: pos.x, y: pos.y, tiempo: Date.now() };
     cliente.publicar('nodo_mover', {
       classId,
       x: pos.x,

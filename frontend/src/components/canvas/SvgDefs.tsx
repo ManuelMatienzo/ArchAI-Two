@@ -30,30 +30,30 @@ export const SvgDefs: React.FC = () => (
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--relation-line)" />
     </marker>
 
-    {/* Composition Diamond */}
+    {/* Composition Diamond (refX=15 para anclar la punta en el borde exterior sin invadir el card) */}
     <marker
       id="uml-diamond"
       viewBox="0 0 16 16"
-      refX="1"
+      refX="15"
       refY="8"
-      markerWidth="12"
-      markerHeight="12"
-      orient="auto"
+      markerWidth="13"
+      markerHeight="13"
+      orient="auto-start-reverse"
     >
-      <polygon points="1,8 8,2 15,8 8,14" fill="var(--accent-cyan)" stroke="#ffffff" strokeWidth="1.2" />
+      <polygon points="1,8 8,2 15,8 8,14" fill="#e8c39e" stroke="#ffffff" strokeWidth="1.2" />
     </marker>
 
-    {/* Aggregation Hollow Diamond */}
+    {/* Aggregation Hollow Diamond (refX=15 para anclar la punta en el borde exterior sin invadir el card) */}
     <marker
       id="uml-diamond-hollow"
       viewBox="0 0 16 16"
-      refX="1"
+      refX="15"
       refY="8"
-      markerWidth="12"
-      markerHeight="12"
-      orient="auto"
+      markerWidth="13"
+      markerHeight="13"
+      orient="auto-start-reverse"
     >
-      <polygon points="1,8 8,2 15,8 8,14" fill="var(--bg-canvas)" stroke="var(--accent-cyan)" strokeWidth="1.5" />
+      <polygon points="1,8 8,2 15,8 8,14" fill="var(--bg-canvas, #060814)" stroke="#e8c39e" strokeWidth="1.5" />
     </marker>
 
     {/* Inheritance Hollow Triangle */}
