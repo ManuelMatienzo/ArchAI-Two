@@ -63,9 +63,13 @@ desktop.ini
 *~
 .env.local
 mobile/google-services.json
+mobile/config-movil.json
 mobile/*service-account*.json
 mobile/*firebase-adminsdk*.json
 mobile/credentials.json
+# Credenciales de servicio FCM del backend (nunca versionar)
+backend/*service-account*.json
+backend/*firebase-adminsdk*.json
 *.jks
 *.keystore
 .archai/

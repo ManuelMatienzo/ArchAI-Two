@@ -202,9 +202,12 @@ try {
     };
     const diagram = await api('/api/v1/diagramas', model, owner.token),
       diagramId = diagram.id;
-    const session = await api('/api/v1/colaboracion/salas/abrir', { diagramId }, owner.token),
+    const accessCode = project.codigoAcceso;
+    assert.ok(accessCode);
+    const session = await api('/api/v1/colaboracion/salas/abrir', { diagramId, roomId: accessCode }, owner.token),
       room = session.roomId;
-    assert.equal((await api('/api/v1/colaboracion/salas/abrir', { diagramId }, editor.token)).roomId, room);
+    assert.equal(room, accessCode.startsWith('ARC-') ? accessCode : `ARC-${accessCode}`);
+    assert.equal((await api('/api/v1/colaboracion/salas/abrir', { diagramId, roomId: room }, editor.token)).roomId, room);
     const otherProject = await api('/api/v1/proyectos', { nombre: 'Proyecto aislado' }, stranger.token),
       otherDiagram = await api(
         '/api/v1/diagramas',
@@ -393,6 +396,28 @@ try {
       a.messages.filter((m) => m.tipo === 'chat_settings').every((m) => m.payload.canConfigure === undefined),
       'No distribuye permisos del anfitrión a lectores'
     );
+    const observer = await client(room, reader.token);
+    await pause(200);
+    const publish = ({ ws }, tipo, payload) => ws.send(
+      `SEND\ndestination:/app/collab/${room}\ncontent-type:application/json\n\n${JSON.stringify({ salaId: room, tipo, payload })}\0`
+    );
+    const deniedX = 9876;
+    publish(observer, 'nodo_mover', { classId: 'paciente', x: deniedX, y: 120 });
+    publish(observer, 'diagrama', { ...model, title: 'Edición de lectura no permitida' });
+    const mobileMessageId = crypto.randomUUID();
+    const mobileMessage = { id: mobileMessageId, content: 'Mensaje de un lector desde el canal móvil.' };
+    publish(observer, 'chat', mobileMessage);
+    publish(observer, 'chat', mobileMessage);
+    const delivered = (connection) => connection.messages.filter(
+      (event) => event.tipo === 'chat_message' && event.payload.id === mobileMessageId
+    );
+    await until(() => delivered(a).length && delivered(b).length && delivered(observer).length, 'chat móvil desde una sesión lectora');
+    publish(b, 'nodo_mover', { classId: 'paciente', x: 112, y: 120 });
+    await until(() => observer.messages.some((event) => event.tipo === 'nodo_mover' && event.payload.x === 112), 'movimiento de un editor');
+    assert.equal(delivered(a).length, 1);
+    assert.equal(delivered(b).length, 1);
+    assert.equal(a.messages.some((event) => event.tipo === 'nodo_mover' && event.payload.x === deniedX), false);
+    assert.equal(a.messages.some((event) => event.tipo === 'diagrama' && event.emisorId === reader.user.id), false);
     await control({ delay: 500 });
     const detached = {
       id: crypto.randomUUID(),

@@ -155,8 +155,8 @@ export const CanvasRelationLayer: React.FC<CanvasRelationLayerProps> = memo(({ p
         }
 
         // Bounding box dinámico ultra-liviano para esta relación individual
-        const xs = [r.startX, r.endX, r.c1X, r.c2X].filter(Number.isFinite);
-        const ys = [r.startY, r.endY, r.c1Y, r.c2Y].filter(Number.isFinite);
+        const xs = [r.startX, r.endX, r.midX].filter(Number.isFinite);
+        const ys = [r.startY, r.endY, r.midY].filter(Number.isFinite);
 
         if (r.sourceMultiplicity && Number.isFinite(r.srcMultX)) xs.push(r.srcMultX - 25, r.srcMultX + 25);
         if (r.sourceMultiplicity && Number.isFinite(r.srcMultY)) ys.push(r.srcMultY - 20, r.srcMultY + 20);

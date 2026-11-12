@@ -436,7 +436,18 @@ export const StudioPage: React.FC<StudioPageProps> = ({
     setDiagram(prev => {
       const rawNext = typeof updater === 'function' ? updater(prev) : updater;
       if (rawNext === prev) return prev;
-      const next = sanitizarDiagramaUML25({...rawNext,...((prev as any)._reviewRevision!==undefined?{_reviewRevision:(prev as any)._reviewRevision}:{})});
+
+      // Deduplicar atributos y métodos por id para evitar duplicados acumulados
+      const deduped: ModeloDiagrama = {
+        ...rawNext,
+        classes: (rawNext.classes || []).map(c => ({
+          ...c,
+          attributes: Array.from(new Map((c.attributes || []).map(a => [a.id, a])).values()),
+          methods: Array.from(new Map((c.methods || []).map(m => [m.id, m])).values()),
+        }))
+      };
+
+      const next = sanitizarDiagramaUML25({...deduped,...((prev as any)._reviewRevision!==undefined?{_reviewRevision:(prev as any)._reviewRevision}:{})});
 
       if (recordHistory) {
         const prevSerialized = serializeForDiff(prev);
@@ -767,7 +778,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
         if(tipo==='ia_revision'){reviewRef.current.receiveRevision(payload.payload);return;}
         if (tipo?.startsWith('ia_') || tipo?.startsWith('chat_')) return;
 
-        // Ignorar únicamente ecos de esta misma pestaña
         if (emisorId === emisorIdInstancia && tipo !== 'diagrama') return;
 
         // 1. Detección de nuevo participante en la sala
@@ -920,7 +930,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           }
         } else {
           // Si somos el anfitrión, respaldar de inmediato el diagrama oficial en la memoria del backend
-          if (habitacionId && habitacionId !== 'LOCAL-MODE' && diagramRef.current.classes?.length > 0) {
+          if (!diagramId && habitacionId && habitacionId !== 'LOCAL-MODE' && diagramRef.current.classes?.length > 0) {
             actualizarDiagramaSala(habitacionId, diagramRef.current).catch(() => {});
           }
         }
@@ -967,8 +977,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       const payload = construirPayloadDiagrama(diagramaActual);
       stompRef.current.publicar('diagrama', payload);
 
-      // Respaldar también en backend para nuevos ingresantes o reconexiones
-      if (!arrastreEnCursoRef.current && currentSession.roomId && currentSession.roomId !== 'LOCAL-MODE') {
+      // Las salas con diagrama guardado persisten la edición recibida por STOMP.
+      if (!diagramId && !arrastreEnCursoRef.current && currentSession.roomId && currentSession.roomId !== 'LOCAL-MODE') {
         actualizarDiagramaSala(currentSession.roomId, diagramaActual).catch(() => {});
       }
     }, 60);
@@ -1893,7 +1903,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({
               padding: '20px'
             }}>
               <div style={{ maxWidth: '720px' }}>
-                <PanelColaboracion session={currentSession} />
+                <PanelColaboracion key={currentSession.roomId} session={currentSession} onReconnect={() => setConnectionAttempt(attempt => attempt + 1)} />
                 <div style={{
                   marginTop: '10px',
                   padding: '10px 16px',

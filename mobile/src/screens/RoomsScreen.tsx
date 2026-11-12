@@ -225,7 +225,7 @@ export const RoomsScreen = ({ navigation }: any) => {
   // Selección de proyecto: abre el visor de canvas pasando projectId para cargar su diagrama
   const handleSelectProject = async (project: ProjectItem) => {
     try {
-      const session = await conversationApi.resolve(undefined, project.id);
+      const session = await conversationApi.resolve(project.codigoAcceso, project.id);
       navigation.navigate('CanvasViewer', {
         roomId: session.roomId,
         roomName: session.roomName,

@@ -169,6 +169,8 @@ export const ChatScreen = ({ route, navigation }: any) => {
   // 6. Suscripcion a la sala en tiempo real (Chat + Propuestas IA + Diagrama en vivo)
   useEffect(() => {
     let isSubscribed = true;
+    let unsubscribeChat: (() => void) | undefined;
+    let unsubscribeDiagram: (() => void) | undefined;
 
     const handleIncomingMessage = (incoming: CollabMessage) => {
       if (!isSubscribed || !incoming) return;
@@ -201,21 +203,18 @@ export const ChatScreen = ({ route, navigation }: any) => {
       }
     };
 
-    mobileStomp.connect(() => {
+    void mobileStomp.connect(() => {
       if (!isSubscribed) return;
-      mobileStomp.subscribeChat(roomId, handleIncomingMessage);
-      mobileStomp.subscribeRoomCollab(roomId, handleCollabEvents);
-    });
-
-    if (mobileStomp.isConnected()) {
-      mobileStomp.subscribeChat(roomId, handleIncomingMessage);
-      mobileStomp.subscribeRoomCollab(roomId, handleCollabEvents);
-    }
+      unsubscribeChat?.();
+      unsubscribeDiagram?.();
+      unsubscribeChat = mobileStomp.subscribeChat(roomId, handleIncomingMessage);
+      unsubscribeDiagram = mobileStomp.subscribeRoomCollab(roomId, handleCollabEvents);
+    }).catch(() => {});
 
     return () => {
       isSubscribed = false;
-      mobileStomp.unsubscribe(`/topic/room/${roomId}/chat`);
-      mobileStomp.unsubscribe(`/topic/collab/${roomId}`);
+      unsubscribeChat?.();
+      unsubscribeDiagram?.();
     };
   }, [roomId]);
 

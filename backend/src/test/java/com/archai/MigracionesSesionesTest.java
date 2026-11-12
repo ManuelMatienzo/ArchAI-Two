@@ -19,7 +19,7 @@ class MigracionesSesionesTest {
             ""
         );
         var project = Flyway.configure().dataSource(datasource).locations("classpath:db/migration").load();
-        project.migrate();
+        Flyway.configure().dataSource(datasource).locations("classpath:db/migration").target("2").load().migrate();
         var jdbc = new JdbcTemplate(datasource);
         jdbc.update(
             "INSERT INTO \"flyway_schema_history\" (\"installed_rank\",\"version\",\"description\",\"type\",\"script\",\"checksum\",\"installed_by\",\"execution_time\",\"success\") VALUES (3,'3','CU23 suscripciones push','SQL','V3__CU23_suscripciones_push.sql',1599809248,'sa',0,TRUE)"

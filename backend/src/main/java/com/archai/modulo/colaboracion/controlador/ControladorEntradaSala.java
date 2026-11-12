@@ -71,6 +71,7 @@ public class ControladorEntradaSala {
             id,
             d.getProyecto() == null ? null : d.getProyecto().getId()
         );
+        pin = session.getRoomId();
         reviews.estado(pin, id, auth);
         broker.convertAndSend(
             "/topic/collab/" + pin,

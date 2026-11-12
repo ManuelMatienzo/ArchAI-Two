@@ -43,16 +43,23 @@ public class ControladorColaboracion {
         mensaje.setEmisorId(instance.startsWith(userId + "#") ? instance : userId);
         mensaje.setEmisorNombre(profile.getNombre());
         String diagram = servicioSalaColaborativa.diagramaId(salaId);
-        if (
-            diagram != null &&
-            !java.util.Set.of("cursor", "join", "leave", "salir", "solicitar_diagrama", "chat", "ia_request").contains(
-                String.valueOf(mensaje.getTipo())
-            ) &&
-            !revisiones.puedeEditar(diagram, userId)
-        ) throw new org.springframework.web.server.ResponseStatusException(
-            org.springframework.http.HttpStatus.FORBIDDEN,
-            "No tienes permiso para editar este diagrama."
-        );
+        boolean efimero = java.util.Set.of(
+            "cursor",
+            "join",
+            "leave",
+            "salir",
+            "solicitar_diagrama",
+            "chat",
+            "ia_request"
+        ).contains(String.valueOf(mensaje.getTipo()));
+        if (diagram != null && !efimero && !revisiones.puedeEditar(diagram, userId)) {
+            // El lector conserva su conexión y puede seguir recibiendo cambios.
+            if ("diagrama".equals(mensaje.getTipo()) || "nodo_mover".equals(mensaje.getTipo())) return;
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "No tienes permiso para editar este diagrama."
+            );
+        }
         if ("chat".equals(mensaje.getTipo())) {
             if (diagram == null) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.BAD_REQUEST,

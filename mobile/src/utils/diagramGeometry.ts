@@ -10,10 +10,7 @@ export interface ComputedRelationshipPath {
   startY: number;
   endX: number;
   endY: number;
-  c1X: number;
-  c1Y: number;
-  c2X: number;
-  c2Y: number;
+  /** Punto de giro/medio para la etiqueta (líneas ortogonales) */
   midX: number;
   midY: number;
   sourceMultiplicity: string;
@@ -30,19 +27,21 @@ export interface ComputedRelationshipPath {
 
 /**
  * Calcula la altura real aproximada de una tarjeta de clase según sus atributos visibles.
+ * UML 2.5+: 3 compartimentos (nombre | atributos | operaciones).
  */
 export function getEstimatedClassHeight(c: UmlClass): number {
   const attrCount = Math.min(Array.isArray(c.attributes) ? c.attributes.length : 0, 4);
-  // Cabecera (~58px) + relleno atributos (16px + attrCount * 22px) + pie inspección (~26px)
-  return 58 + 16 + attrCount * 22 + 26;
+  const methodCount = Math.min(Array.isArray(c.methods) ? c.methods.length : 0, 4);
+  // Cabecera + atributos + operaciones + padding
+  return 60 + attrCount * 20 + methodCount * 18 + 30;
 }
 
 type Side = 'LEFT' | 'RIGHT' | 'TOP' | 'BOTTOM';
 
 /**
- * Motor geométrico de relaciones UML:
- * Calcula tangencias, puntos de contacto en el perímetro exterior de las cajas
- * y curvas Bézier cúbicas suaves sin cruces indeseados.
+ * Motor geométrico de relaciones UML 2.5+.
+ * Genera líneas ortogonales (solo segmentos rectos con ángulos de 90°)
+ * sin curvas Bézier, conforme al estándar UML 2.5+.
  */
 export function computeDiagramRelationships(
   classes: UmlClass[],
@@ -58,8 +57,6 @@ export function computeDiagramRelationships(
     const tgt = classMap.get(rel.targetId);
     if (!src || !tgt) return;
 
-    // Descarta nodos con coordenadas no finitas: evita `NaN` en `pathD` y en
-    // atributos SVG (react-native-svg puede abortar el proceso nativo en Android).
     if (
       !Number.isFinite(src.x) ||
       !Number.isFinite(src.y) ||
@@ -79,21 +76,19 @@ export function computeDiagramRelationships(
     const tgtCx = tgt.x + tgtW / 2;
     const tgtCy = tgt.y + tgtH / 2;
 
-    // Relación a sí misma (Auto-asociación en bucle exterior)
+    // Relación a sí misma (Auto-asociación en bucle ortogonal)
     if (src.id === tgt.id) {
+      const loopSize = 55;
       const startX = src.x + srcW;
-      const startY = src.y + 40;
-      const endX = src.x + srcW - 40;
+      const startY = src.y + 45;
+      const cornerX = startX + loopSize;
+      const cornerY = startY - loopSize;
+      const endX = src.x + srcW - 45;
       const endY = src.y;
 
-      const c1X = src.x + srcW + 65;
-      const c1Y = src.y + 10;
-      const c2X = src.x + srcW - 10;
-      const c2Y = src.y - 60;
-
-      const pathD = `M ${startX} ${startY} C ${c1X} ${c1Y}, ${c2X} ${c2Y}, ${endX} ${endY}`;
-      const midX = src.x + srcW + 30;
-      const midY = src.y - 20;
+      const pathD = `M ${startX} ${startY} L ${cornerX} ${startY} L ${cornerX} ${cornerY} L ${endX} ${cornerY} L ${endX} ${endY}`;
+      const midX = cornerX;
+      const midY = cornerY - 15;
 
       results.push({
         id: rel.id,
@@ -105,21 +100,17 @@ export function computeDiagramRelationships(
         startY,
         endX,
         endY,
-        c1X,
-        c1Y,
-        c2X,
-        c2Y,
         midX,
         midY,
         sourceMultiplicity: rel.sourceMultiplicity || '1',
         targetMultiplicity: rel.targetMultiplicity || '0..*',
-        srcMultX: startX + 8,
-        srcMultY: startY + 14,
+        srcMultX: startX + 10,
+        srcMultY: startY + 16,
         tgtMultX: endX - 10,
         tgtMultY: endY - 14,
         name: rel.name,
         isGhostDraft: rel.isGhostDraft,
-        angle: Math.atan2(endY - c2Y, endX - c2X),
+        angle: -Math.PI / 2,
         markerType: getMarkerType(rel.type),
       });
       return;
@@ -175,74 +166,103 @@ export function computeDiagramRelationships(
     // Puntos de anclaje perimetrales
     let startX = srcCx;
     let startY = srcCy;
-    let sDirX = 0;
-    let sDirY = 0;
 
     if (srcSide === 'RIGHT') {
       startX = src.x + srcW;
       startY = Math.max(src.y + 24, Math.min(src.y + srcH - 24, srcCy));
-      sDirX = 1;
     } else if (srcSide === 'LEFT') {
       startX = src.x;
       startY = Math.max(src.y + 24, Math.min(src.y + srcH - 24, srcCy));
-      sDirX = -1;
     } else if (srcSide === 'BOTTOM') {
       startX = Math.max(src.x + 24, Math.min(src.x + srcW - 24, srcCx));
       startY = src.y + srcH;
-      sDirY = 1;
     } else if (srcSide === 'TOP') {
       startX = Math.max(src.x + 24, Math.min(src.x + srcW - 24, srcCx));
       startY = src.y;
-      sDirY = -1;
     }
 
     let endX = tgtCx;
     let endY = tgtCy;
-    let tDirX = 0;
-    let tDirY = 0;
 
     if (tgtSide === 'LEFT') {
       endX = tgt.x;
       endY = Math.max(tgt.y + 24, Math.min(tgt.y + tgtH - 24, tgtCy));
-      tDirX = -1;
     } else if (tgtSide === 'RIGHT') {
       endX = tgt.x + tgtW;
       endY = Math.max(tgt.y + 24, Math.min(tgt.y + tgtH - 24, tgtCy));
-      tDirX = 1;
     } else if (tgtSide === 'TOP') {
       endX = Math.max(tgt.x + 24, Math.min(tgt.x + tgtW - 24, tgtCx));
       endY = tgt.y;
-      tDirY = -1;
     } else if (tgtSide === 'BOTTOM') {
       endX = Math.max(tgt.x + 24, Math.min(tgt.x + tgtW - 24, tgtCx));
       endY = tgt.y + tgtH;
-      tDirY = 1;
     }
 
-    // Puntos de control Bézier con curvatura proporcional
-    const distance = Math.hypot(endX - startX, endY - startY);
-    const dist = Math.max(35, Math.min(150, distance * 0.42));
+    // ========================================================================
+    // LÍNEAS ORTOGONALES UML 2.5+
+    // Solo segmentos rectos con ángulos de 90°.
+    // Un solo escalón intermedio cuando hay desnivel.
+    // ========================================================================
 
-    const c1X = startX + sDirX * dist;
-    const c1Y = startY + sDirY * dist;
-    const c2X = endX + tDirX * dist;
-    const c2Y = endY + tDirY * dist;
+    let pathD: string;
+    let labelMidX: number;
+    let labelMidY: number;
 
-    const pathD = `M ${startX} ${startY} C ${c1X} ${c1Y}, ${c2X} ${c2Y}, ${endX} ${endY}`;
-
-    // Punto medio exacto de la curva (t = 0.5)
-    const midX = 0.125 * startX + 0.375 * c1X + 0.375 * c2X + 0.125 * endX;
-    const midY = 0.125 * startY + 0.375 * c1Y + 0.375 * c2Y + 0.125 * endY;
-
-    // Posicionamiento de multiplicidades en los extremos
-    const srcMultX = startX + sDirX * 18 + (sDirY !== 0 ? 12 : 0);
-    const srcMultY = startY + sDirY * 18 - 8;
-
-    const tgtMultX = endX + tDirX * 18 + (tDirY !== 0 ? 12 : 0);
-    const tgtMultY = endY + tDirY * 18 - 8;
+    // Casos opuestos horizontales: RIGHT->LEFT o LEFT->RIGHT
+    if (
+      (srcSide === 'RIGHT' && tgtSide === 'LEFT') ||
+      (srcSide === 'LEFT' && tgtSide === 'RIGHT')
+    ) {
+      if (Math.abs(startY - endY) < 2) {
+        // Misma altura: línea recta horizontal
+        pathD = `M ${startX} ${startY} L ${endX} ${endY}`;
+        labelMidX = (startX + endX) / 2;
+        labelMidY = startY;
+      } else {
+        // Escalón: horizontal -> vertical -> horizontal en punto medio X
+        const midXStep = (startX + endX) / 2;
+        pathD = `M ${startX} ${startY} L ${midXStep} ${startY} L ${midXStep} ${endY} L ${endX} ${endY}`;
+        labelMidX = midXStep;
+        labelMidY = (startY + endY) / 2;
+      }
+    }
+    // Casos opuestos verticales: BOTTOM->TOP o TOP->BOTTOM
+    else if (
+      (srcSide === 'BOTTOM' && tgtSide === 'TOP') ||
+      (srcSide === 'TOP' && tgtSide === 'BOTTOM')
+    ) {
+      if (Math.abs(startX - endX) < 2) {
+        // Misma vertical: línea recta vertical
+        pathD = `M ${startX} ${startY} L ${endX} ${endY}`;
+        labelMidX = startX;
+        labelMidY = (startY + endY) / 2;
+      } else {
+        // Escalón: vertical -> horizontal -> vertical en punto medio Y
+        const midYStep = (startY + endY) / 2;
+        pathD = `M ${startX} ${startY} L ${startX} ${midYStep} L ${endX} ${midYStep} L ${endX} ${endY}`;
+        labelMidX = (startX + endX) / 2;
+        labelMidY = midYStep;
+      }
+    }
+    // Lados adyacentes: giro en L con un solo ángulo de 90°
+    else {
+      // Elegir el punto de giro: salir horizontalmente del origen, luego girar
+      const cornerX = endX;
+      const cornerY = startY;
+      pathD = `M ${startX} ${startY} L ${cornerX} ${cornerY} L ${endX} ${endY}`;
+      labelMidX = (startX + cornerX + endX) / 3;
+      labelMidY = (startY + cornerY + endY) / 3;
+    }
 
     // Ángulo en el extremo destino para dibujar el marcador
-    const angle = Math.atan2(endY - c2Y, endX - c2X);
+    const angle = Math.atan2(endY - startY, endX - startX);
+
+    // Posicionamiento de multiplicidades (ajustado para líneas ortogonales)
+    const srcMultX = startX + (srcSide === 'RIGHT' ? 10 : srcSide === 'LEFT' ? -22 : 10);
+    const srcMultY = startY + (srcSide === 'RIGHT' || srcSide === 'LEFT' ? -8 : srcSide === 'BOTTOM' ? 16 : -10);
+
+    const tgtMultX = endX + (tgtSide === 'LEFT' ? -22 : tgtSide === 'RIGHT' ? 10 : 10);
+    const tgtMultY = endY + (tgtSide === 'LEFT' || tgtSide === 'RIGHT' ? -8 : tgtSide === 'TOP' ? -10 : 16);
 
     results.push({
       id: rel.id,
@@ -254,12 +274,8 @@ export function computeDiagramRelationships(
       startY,
       endX,
       endY,
-      c1X,
-      c1Y,
-      c2X,
-      c2Y,
-      midX,
-      midY,
+      midX: labelMidX,
+      midY: labelMidY,
       sourceMultiplicity: rel.sourceMultiplicity || '1',
       targetMultiplicity: rel.targetMultiplicity || '1..*',
       srcMultX,
@@ -273,8 +289,7 @@ export function computeDiagramRelationships(
     });
   });
 
-  // Última barrera: descarta cualquier relación con geometría no finita para que
-  // react-native-svg nunca reciba `NaN` en `d`, `points` o coordenadas.
+  // Última barrera: descarta cualquier relación con geometría no finita
   return results.filter(
     (r) =>
       Number.isFinite(r.startX) &&

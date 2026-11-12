@@ -53,9 +53,11 @@ export const conversationApi = {
       throw new Error(
         'La sala aún no tiene un diagrama guardado. Ábrelo desde la web o selecciona su proyecto.'
       );
+    // La web y el móvil envían el código del proyecto al abrirlo y usan el PIN
+    // normalizado que devuelve el servidor para suscribirse.
     return apiFetch('/colaboracion/salas/abrir', {
       method: 'POST',
-      body: JSON.stringify({ diagramId: id, ...(!projectId && room ? { roomId: room } : {}) }),
+      body: JSON.stringify({ diagramId: id, ...(room ? { roomId: room } : {}) }),
     });
   },
   state: (room: string, id: string) => apiFetch(chatPath(room, id, '/sesion')),
