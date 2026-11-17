@@ -666,10 +666,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const miInstanciaIdRef = useRef<string>(
     'tab-' + Math.random().toString(36).slice(2, 8) + '-' + Date.now().toString(36)
   );
-  // CU-03: Sello de la última posición emitida localmente para ignorar ecos propios del STOMP
-  const ultimaPosicionEmitidaRef = useRef<{ classId: string; x: number; y: number; tiempo: number } | null>(null);
-  // CU-03: ID de sesión de arrastre monótonamente creciente (para eco suppression sin race condition)
-  const dragSessionRef = useRef<number>(0);
   // CU-03: bandera para NO golpear la nube con guardados durante un arrastre en curso (solo al soltar)
   const arrastreEnCursoRef = useRef<boolean>(false);
   const proposals = useProposals(currentSession, diagram, roomReady && estadoColab === 'conectado',
@@ -758,24 +754,17 @@ export const StudioPage: React.FC<StudioPageProps> = ({
 
         // Manejo de mensajes de chat (CU-03 · Sincronización lateral)
         if (tipo === 'chat') {
-          const contenido = payload?.contenido || payload?.content || '';
+          const mensaje = payload?.payload || payload;
+          const contenido = mensaje?.contenido || mensaje?.content || mensaje?.text || '';
           if (contenido.trim()) {
             setTeamChatMessages(prev => {
               // Evitar duplicados con el mismo contenido y mismo emisor en 2 segundos
               const yaExiste = prev.some(
-                m => m.content === contenido && m.senderId === payload?.emisorId
+                m => m.content === contenido && m.senderId === (mensaje?.senderId || payload?.emisorId)
               );
               if (yaExiste) return prev;
-              return [...prev, { ...payload, tiempoLlegada: Date.now() }];
+              return [...prev, { ...mensaje, content: contenido, senderId: mensaje?.senderId || payload?.emisorId, sender: mensaje?.sender || payload?.emisorNombre, tiempoLlegada: Date.now() }];
             });
-          }
-          // También mostrar un toast ligero si la ventana no está enfocada
-          if (typeof window !== 'undefined') {
-            const yaMostrado = prev.some(m => m.tiempoLlegada && Date.now() - m.tiempoLlegada < 3000);
-            if (!yaMostrado) {
-              const notificacion = new Notif({ title: 'Nuevo mensaje', message: `${payload?.sender}: ${contenido.trim()}` });
-              notificacion.push();
-            }
           }
           return;
         }
@@ -838,15 +827,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
           const y = datos.y;
           const nombre = payload.emisorNombre || 'Colaborador';
           const color = datos.color || '#2f2c79';
-
-          // Ignorar eco propio del STOMP: si la posición coincide con la que acabamos de emitir,
-          // descartarla para evitar que el eco sobrescriba el estado local y cause retrocesos.
-          const propia = ultimaPosicionEmitidaRef.current;
-            const esPropioEcho = propia?.sessionId === dragSessionRef.current;
-            if (esPropioEcho) {
-              ultimaPosicionEmitidaRef.current = null;
-              return;
-            }
 
           // Registrar quién está moviendo la tabla para mostrar indicador visual
           setRemoteDraggingNodes(prev => ({
@@ -1024,10 +1004,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
   const manejarNodeDrag = (classId: string, pos: { x: number; y: number }) => {
     const cliente = stompRef.current;
     if (!cliente || !cliente.estaConectado()) return;
-    // Registrar la posición emitida para ignorar el eco propio del STOMP y evitar retrocesos
-    // Usamos dragSessionRef en lugar de comparar coordenadas para evitar race conditions
-    dragSessionRef.current += 1;
-    ultimaPosicionEmitidaRef.current = { classId, x: pos.x, y: pos.y, tiempo: Date.now(), sessionId: dragSessionRef.current };
     cliente.publicar('nodo_mover', {
       classId,
       x: pos.x,
@@ -1443,7 +1419,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       roomId: currentSession.roomId,
       status: 'entregado',
-      tipo: 'chat'  // <-- AGREGADO: permite que el subscriber y el móvil reconozcan el mensaje
     };
     setTeamChatMessages(prev => [...prev, msg]);
     stompRef.current.publicar('chat', msg);
