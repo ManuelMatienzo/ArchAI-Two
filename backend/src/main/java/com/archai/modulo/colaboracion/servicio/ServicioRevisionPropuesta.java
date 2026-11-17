@@ -39,9 +39,11 @@ public class ServicioRevisionPropuesta {
         long revision = 0,
             sequence = 0;
         ObjectNode official;
-        boolean dirty, checkpointDirty;
+        boolean dirty, checkpointDirty, sqlDirty;
+        String persistedJson;
         long changedAt,
-            lastCheckpoint = System.currentTimeMillis();
+            lastCheckpoint = System.currentTimeMillis(),
+            lastSqlSave = System.currentTimeMillis();
         final Deque<ObjectNode> undo = new ArrayDeque<>(),
             redo = new ArrayDeque<>();
         final Map<String, ObjectNode> proposals = new LinkedHashMap<>();
@@ -136,9 +138,8 @@ public class ServicioRevisionPropuesta {
         e = new Estado();
         e.diagramId = diagramId;
         try {
-            e.persistedStructure = estructura(
-                mapper.readTree(diagramas.findById(diagramId).orElseThrow().getJsonDiagrama())
-            );
+            e.persistedJson = diagramas.findById(diagramId).orElseThrow().getJsonDiagrama();
+            e.persistedStructure = estructura(mapper.readTree(e.persistedJson));
             Object live = salas.obtenerDiagramaDeSala(room);
             e.official =
                 live == null
@@ -419,6 +420,10 @@ public class ServicioRevisionPropuesta {
                 proposalId
             );
             else documentos.guardar("revision_propuestas", room, saved);
+            if (approvalExpected != null) {
+                e.persistedJson = e.official.toString();
+                e.sqlDirty = false;
+            }
             e.dirty = false;
             e.checkpointDirty = true;
             if (approvalExpected != null) emitir(room, "diagrama", e.official);
@@ -476,6 +481,7 @@ public class ServicioRevisionPropuesta {
             salas.actualizarDiagramaDeSala(room, n);
             e.dirty = true;
             e.checkpointDirty = true;
+            e.sqlDirty = true;
             e.changedAt = System.currentTimeMillis();
             emitir(room, "diagrama", n);
             return n;
@@ -502,6 +508,7 @@ public class ServicioRevisionPropuesta {
         salas.actualizarDiagramaDeSala(room, n);
         e.dirty = true;
         e.checkpointDirty = true;
+        e.sqlDirty = true;
         e.changedAt = System.currentTimeMillis();
         e.sequence++;
         emitir(
@@ -565,6 +572,8 @@ public class ServicioRevisionPropuesta {
                 var current = diagramas.findCurrentJson(event.id());
                 if (current.isEmpty()) continue;
                 ObjectNode saved = objeto(mapper.readTree(current.get()));
+                e.persistedJson = current.get();
+                e.sqlDirty = false;
                 String savedStructure = estructura(saved);
                 boolean structural = !savedStructure.equals(estructura(e.official));
                 boolean layout = !disposicion(saved).equals(disposicion(e.official));
@@ -599,6 +608,9 @@ public class ServicioRevisionPropuesta {
         c.official = e.official.deepCopy();
         c.dirty = e.dirty;
         c.checkpointDirty = e.checkpointDirty;
+        c.sqlDirty = e.sqlDirty;
+        c.persistedJson = e.persistedJson;
+        c.lastSqlSave = e.lastSqlSave;
         c.lastCheckpoint = e.lastCheckpoint;
         c.changedAt = e.changedAt;
         e.proposals.forEach((k, v) -> c.proposals.put(k, v.deepCopy()));
@@ -616,6 +628,14 @@ public class ServicioRevisionPropuesta {
             if (e.dirty && now - e.changedAt >= 1500) {
                 documentos.guardar("revision_propuestas", item.getKey(), documento(item.getKey(), e));
                 e.dirty = false;
+            }
+            if (e.sqlDirty && (now - e.changedAt >= 1500 || now - e.lastSqlSave >= 30000)) {
+                if (persistencia.guardarAutomatico(e.diagramId, e.official, e.persistedJson)) {
+                    e.persistedJson = e.official.toString();
+                    e.persistedStructure = estructura(e.official);
+                    e.sqlDirty = false;
+                    e.lastSqlSave = now;
+                }
             }
             if (e.checkpointDirty && now - e.lastCheckpoint >= 30000) checkpoint(item.getKey(), e);
         }
@@ -721,6 +741,8 @@ public class ServicioRevisionPropuesta {
                 ""
             );
             e.persistedStructure = estructura(e.official);
+            e.persistedJson = e.official.toString();
+            e.sqlDirty = false;
             salas.actualizarDiagramaDeSala(room, e.official);
             emitir(room, "diagrama", e.official);
             emitir(room, "ia_draft_state", snapshot(e));

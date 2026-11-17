@@ -32,6 +32,7 @@ class RevisionPropuestaTest {
     @Autowired MiembroProyectoRepository members;
     @Autowired DiagramaRepository diagrams;
     @Autowired VersionDiagramaRepository versions;
+    @Autowired PersistenciaPropuesta persistence;
     String room,id,auth,readerAuth,userId;
     ObjectNode official,draft;
     @BeforeEach void setup() throws Exception {
@@ -85,6 +86,26 @@ class RevisionPropuestaTest {
         assertEquals(1,loaded.getClasses().size());assertEquals("Paciente",loaded.getClasses().get(0).getName());
         assertNotNull(loaded.getUpdatedAt());
         assertTrue(diagramService.listarDiagramas(null).stream().anyMatch(d->id.equals(d.getId()) && d.getClasses().size()==1));
+    }
+    @Test void cambiosDeSalaSeGuardanEnElDiagramaDelProyecto() throws Exception {
+        var live=(ObjectNode)service.estado(room,id,auth).path("official").deepCopy();
+        live.withArray("classes").addObject().put("id","cuenta").put("name","Cuenta").putArray("attributes");
+        service.actualizarOficial(room,live,userId);
+        Thread.sleep(1700);
+        service.guardarCambios();
+        var saved=diagramService.obtenerPorId(id).orElseThrow();
+        assertEquals(2,saved.getClasses().size());
+        assertEquals("Cuenta",saved.getClasses().get(1).getName());
+        assertTrue(versions.findByDiagramaIdOrderByNumeroVersionDesc(id).isEmpty());
+    }
+    @Test void guardadoAutomaticoNoPisaOtroCambioConfirmado() throws Exception {
+        String previous=diagrams.findById(id).orElseThrow().getJsonDiagrama();
+        var changed=official.deepCopy().put("title","Cambio de otra sesión");
+        var entity=diagrams.findById(id).orElseThrow();
+        entity.setJsonDiagrama(changed.toString());
+        diagrams.saveAndFlush(entity);
+        assertFalse(persistence.guardarAutomatico(id,official,previous));
+        assertEquals("Cambio de otra sesión",mapper.readTree(diagrams.findById(id).orElseThrow().getJsonDiagrama()).path("title").asText());
     }
     @Test void inferenciaRequiereEditorAutenticadoYDiagramaDeLaSala() {
         assertEquals(userId,service.autorizarInferencia(room,id,auth));

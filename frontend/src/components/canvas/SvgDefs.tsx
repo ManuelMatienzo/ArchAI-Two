@@ -40,7 +40,7 @@ export const SvgDefs: React.FC = () => (
       markerHeight="13"
       orient="auto-start-reverse"
     >
-      <polygon points="1,8 8,2 15,8 8,14" fill="#e8c39e" stroke="#ffffff" strokeWidth="1.2" />
+      <polygon points="1,8 8,2 15,8 8,14" fill="var(--relation-line)" stroke="var(--relation-line)" strokeWidth="1.2" />
     </marker>
 
     {/* Aggregation Hollow Diamond (refX=15 para anclar la punta en el borde exterior sin invadir el card) */}
@@ -66,7 +66,7 @@ export const SvgDefs: React.FC = () => (
       markerHeight="10"
       orient="auto"
     >
-      <polygon points="1,1 12,7 1,13" fill="var(--bg-canvas)" stroke="var(--accent-secondary)" strokeWidth="1.5" />
+      <polygon points="1,1 12,7 1,13" fill="var(--bg-canvas)" stroke="var(--relation-line)" strokeWidth="1.5" />
     </marker>
 
     {/* Open Arrow (Dependency & directed navigation) */}

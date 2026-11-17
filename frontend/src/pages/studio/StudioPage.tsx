@@ -971,10 +971,13 @@ export const StudioPage: React.FC<StudioPageProps> = ({
       if (!stompRef.current?.estaConectado()) return;
       ultimaPublicacionRef.current = Date.now();
       const payload = construirPayloadDiagrama(diagramaActual);
+      if (reviewRef.current.snapshot && diagramId) {
+        payload._reviewRevision = reviewRef.current.snapshot.officialRevision;
+      }
       stompRef.current.publicar('diagrama', payload);
 
       // Respaldar también en backend para nuevos ingresantes o reconexiones
-      if (!arrastreEnCursoRef.current && currentSession.roomId && currentSession.roomId !== 'LOCAL-MODE') {
+      if (!diagramId && !arrastreEnCursoRef.current && currentSession.roomId && currentSession.roomId !== 'LOCAL-MODE') {
         actualizarDiagramaSala(currentSession.roomId, diagramaActual).catch(() => {});
       }
     }, 60);

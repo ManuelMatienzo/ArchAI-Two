@@ -1,18 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Box,
-  Database,
-  Layers,
-  FileCode,
-  Server,
-  CircleDot,
-  Code2,
-  ListFilter,
-  PackageOpen,
-  StickyNote,
-  FolderOpen,
-  Boxes,
-  Hash,
   Zap,
   Link2,
   Key,
@@ -21,9 +8,10 @@ import {
   Trash2,
   Edit2,
   Sparkles,
-  Crosshair
 } from 'lucide-react';
-import { ModeloDiagrama, ClaseUml, AtributoUml, Visibilidad, TipoRelacion } from '../../types/uml';
+import { ModeloDiagrama, ClaseUml, AtributoUml, MetodoUml, Visibilidad, TipoRelacion } from '../../types/uml';
+import { UmlMemberEditor } from './UmlMemberEditor';
+import './umlCanvas.css';
 import { calcularMadurezClase } from '../../services/softwareMaturity';
 
 /** Helper para inferir tipo reactivamente según el nombre del atributo (extraído al mover la tarjeta). */
@@ -36,28 +24,6 @@ const inferirTipoAtributo = (nombre: string): AtributoUml['type'] => {
   if (/hora|tiempo|creado|actualizado|timestamp|horario|registro|expiracion/i.test(n)) return 'LocalDateTime';
   if (/activo|habilitado|es|tiene|borrado|vigente|valido|pagado|completado|bloqueado/i.test(n)) return 'Boolean';
   return 'String';
-};
-
-/** Iconos por estereotipo (constante de módulo para no recrearla por render). */
-const STEREO_ICONS: Record<string, { icon: React.ReactNode }> = {
-  Class: { icon: <Box size={13} color="currentColor" /> },
-  Entity: { icon: <Database size={13} color="currentColor" /> },
-  Service: { icon: <Layers size={13} color="currentColor" /> },
-  Controller: { icon: <FileCode size={13} color="currentColor" /> },
-  Repository: { icon: <Server size={13} color="currentColor" /> },
-  Interface: { icon: <CircleDot size={13} color="currentColor" /> },
-  Abstract: { icon: <Code2 size={13} color="currentColor" /> },
-  Enum: { icon: <ListFilter size={13} color="currentColor" /> },
-  DTO: { icon: <PackageOpen size={13} color="currentColor" /> },
-  Component: { icon: <Box size={13} color="currentColor" /> },
-  Note: { icon: <StickyNote size={13} color="currentColor" /> },
-  Template: { icon: <Code2 size={13} color="currentColor" /> },
-  Package: { icon: <FolderOpen size={13} color="currentColor" /> },
-  Instance: { icon: <CircleDot size={13} color="currentColor" /> },
-  DataType: { icon: <Boxes size={13} color="currentColor" /> },
-  Primitive: { icon: <Hash size={13} color="currentColor" /> },
-  Signal: { icon: <Zap size={13} color="currentColor" /> },
-  AssociationClass: { icon: <Link2 size={13} color="currentColor" /> }
 };
 
 export interface UmlNodeCardProps {
@@ -93,8 +59,6 @@ export interface UmlNodeCardProps {
   methodReturnType: string;
   methodParams: string;
   methodVis: Visibilidad;
-  // Relación seleccionada (highlight en lista de conexiones)
-  selectedRelationId: string | null;
   // Medición de dimensiones reales del nodo
   nodeDimensionsRef: React.MutableRefObject<Map<string, { w: number; h: number }>>;
   setDimensionTick: React.Dispatch<React.SetStateAction<number>>;
@@ -104,14 +68,14 @@ export interface UmlNodeCardProps {
   onSaveEditingClass: (classId: string, e?: React.FormEvent | React.MouseEvent) => void;
   onDeleteClass: (classId: string) => void;
   onDeleteAttribute: (classId: string, attrId: string) => void;
+  onEditMember: (classId: string, kind: 'attribute' | 'method', memberId: string, changes: Partial<AtributoUml & MetodoUml>) => void;
   onDeleteMethod?: (classId: string, methodId: string) => void;
   onSaveAttribute: (e: React.FormEvent, classId: string) => void;
   onSaveMethod: (e: React.FormEvent, classId: string) => void;
   onAddAttributePreset: (classId: string, presetName: string, presetType: AtributoUml['type'], isPk?: boolean) => void;
   onAddAuditFields: (classId: string) => void;
   onFastLinkSubmit: (sourceClassId: string, srcMult?: string, tgtMult?: string) => void;
-  onStartCanvasLinking: (classId: string) => void;
-  onDeleteRelation: (relationId: string) => void;
+  onStartCanvasLinking: (classId: string, event?: React.MouseEvent<HTMLButtonElement>) => void;
   onAutoCompletarClase?: (classId: string) => void;
   // ─── Setters reactivos (estables de useState) ───
   setEditingClassStereotype: React.Dispatch<React.SetStateAction<ClaseUml['stereotype']>>;
@@ -131,7 +95,6 @@ export interface UmlNodeCardProps {
   setMethodReturnType: React.Dispatch<React.SetStateAction<string>>;
   setMethodParams: React.Dispatch<React.SetStateAction<string>>;
   setMethodVis: React.Dispatch<React.SetStateAction<Visibilidad>>;
-  setSelectedRelationId: React.Dispatch<React.SetStateAction<string | null>>;
   setNameTagReset?: () => void;
 }
 
@@ -160,8 +123,6 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
   editingClassId,
   editingClassName,
   editingClassStereotype,
-  cardFastLinkerClassId,
-  fastLinkTargetClassId,
   addingAttrClassId,
   attrName,
   attrType,
@@ -172,7 +133,6 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
   methodReturnType,
   methodParams: _methodParams,
   methodVis,
-  selectedRelationId,
   nodeDimensionsRef,
   setDimensionTick,
   onMouseDown,
@@ -180,19 +140,17 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
   onSaveEditingClass,
   onDeleteClass,
   onDeleteAttribute,
+  onEditMember,
   onDeleteMethod,
   onSaveAttribute,
   onSaveMethod,
   onAddAttributePreset,
   onAddAuditFields,
   onStartCanvasLinking,
-  onDeleteRelation,
   onAutoCompletarClase,
   setEditingClassStereotype,
   setEditingClassName,
   setEditingClassId,
-  setCardFastLinkerClassId,
-  setFastLinkTargetClassId,
   setAddingAttrClassId,
   setAttrName,
   setAttrType,
@@ -202,13 +160,13 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
   setMethodName,
   setMethodReturnType,
   setMethodParams: _setMethodParams,
-  setMethodVis,
-  setSelectedRelationId
+  setMethodVis
 }) {
+  const [editingMember, setEditingMember] = useState<{ kind: 'attribute' | 'method'; id: string } | null>(null);
+  const member = editingMember ? (editingMember.kind === 'attribute' ? cls.attributes : cls.methods).find(item => item.id === editingMember.id) : undefined;
   const stereotype = cls.stereotype || 'Entity';
   const pos = cls.position || { x: 120, y: 120 };
 
-  const activeStereo = STEREO_ICONS[stereotype] || STEREO_ICONS.Entity;
 
   // Estado local para cardinalidades en el enlazador rápido
   const [_fastLinkSrcMult, _setFastLinkSrcMult] = useState<string>('1');
@@ -223,6 +181,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
   return (
     <div
       key={cls.id}
+      data-class-id={cls.id}
       ref={el => {
         if (el) {
           const w = el.offsetWidth || 330;
@@ -240,7 +199,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         left: `${pos.x}px`,
         top: `${pos.y}px`,
         width: '330px',
-        borderRadius: '12px',
+        borderRadius: '2px',
         pointerEvents: 'auto',
         outline: isConnectingSource
           ? '2px dashed var(--accent-cyan)'
@@ -259,6 +218,14 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         cursor: isConnectingTarget ? 'pointer' : undefined
       }}
     >
+      {canEdit && !draft && ['top', 'right', 'bottom', 'left'].map(side => (
+        <button key={side} type="button" className={`uml-connection-handle uml-connection-handle--${side}`}
+          aria-label={`Crear relación desde ${cls.name}`} title="Arrastra hacia otra clase, o haz clic y elige el destino"
+          onMouseDown={e => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); onStartCanvasLinking(cls.id, e); } }}
+          onClick={e => { e.stopPropagation(); if (e.detail === 0) onStartCanvasLinking(cls.id); }} />
+      ))}
+      {editingMember && member && canEdit && <UmlMemberEditor key={`${editingMember.kind}-${editingMember.id}`} kind={editingMember.kind} member={member}
+        onClose={() => setEditingMember(null)} onSave={changes => { onEditMember(cls.id, editingMember.kind, editingMember.id, changes); setEditingMember(null); }} />}
       {draft && <span className="proposal-ghost-label">Propuesta IA</span>}
       {proposedDeletion&&<span className="proposal-ghost-label proposal-delete-label">Eliminación pendiente de confirmar</span>}
       {/* Badge flotante: Origen de conexión */}
@@ -348,8 +315,8 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
           background: 'var(--glass-node-header-bg)',
           padding: '8px 12px',
           borderBottom: '2px solid var(--glass-node-header-border)',
-          borderTopLeftRadius: '11px',
-          borderTopRightRadius: '11px',
+          borderTopLeftRadius: '1px',
+          borderTopRightRadius: '1px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -369,24 +336,10 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
           flex: 1,
           overflow: 'hidden'
         }}>
-          <div style={{
-            width: '20px',
-            height: '20px',
-            borderRadius: '4px',
-            background: 'var(--glass-node-icon-bg)',
-            border: '1px solid var(--glass-node-header-border)',
-            color: 'var(--glass-node-icon-color)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0
-          }}>
-            {activeStereo.icon}
-          </div>
           <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               {/* Estereotipo entre guillemets UML 2.5 */}
-              <div style={{
+              {stereotype !== 'Class' && <div style={{
                 fontSize: '0.62rem',
                 color: 'var(--glass-node-stereo-color)',
                 fontWeight: 800,
@@ -395,10 +348,11 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
-                marginBottom: '1px'
+                marginBottom: '1px',
+                textAlign: isSelected ? 'left' : 'center'
               }}>
                 &laquo;{stereotype}&raquo;
-              </div>
+              </div>}
 
               {/* Renombrado Inline de Clase */}
               {editingClassId === cls.id && canEdit ? (
@@ -489,7 +443,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
                   </button>
                 </div>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: isSelected ? 'flex-start' : 'center', gap: '6px', minWidth: 0, overflow: 'hidden' }}>
                   <h3
                     onDoubleClick={e => { if (canEdit) onStartEditingClass(cls, e); }}
                     style={{
@@ -511,7 +465,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
                   >
                     {cls.name}
                   </h3>
-                  {canEdit && (
+                  {canEdit && isSelected && (
                     <button
                       onClick={e => onStartEditingClass(cls, e)}
                       style={{
@@ -537,71 +491,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         </div>
 
         {/* Acciones de la cabecera: Enlazar y Eliminar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
-          {canEdit && (
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                onStartCanvasLinking(cls.id);
-              }}
-              style={{
-                background: isConnectingSource ? 'rgba(56, 189, 248, 0.35)' : 'var(--glass-node-btn-bg)',
-                border: isConnectingSource ? '1px solid #38bdf8' : '1px solid var(--glass-node-btn-border)',
-                borderRadius: '6px',
-                padding: '2px 6px',
-                color: isConnectingSource ? '#38bdf8' : 'var(--glass-node-btn-text)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '2px',
-                fontSize: '0.67rem',
-                fontWeight: 700,
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-                transition: 'all 0.15s ease'
-              }}
-              title="Conexión rápida en lienzo"
-            >
-              <Crosshair size={11} color={isConnectingSource ? '#38bdf8' : 'currentColor'} />
-            </button>
-          )}
-
-          {canEdit && (
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                const willOpen = cardFastLinkerClassId !== cls.id;
-                setCardFastLinkerClassId(willOpen ? cls.id : null);
-                if (willOpen) {
-                  const others = diagram.classes.filter(c => c.id !== cls.id);
-                  if (others.length > 0 && (!fastLinkTargetClassId || fastLinkTargetClassId === cls.id)) {
-                    setFastLinkTargetClassId(others[0].id);
-                  }
-                }
-              }}
-              style={{
-                background: cardFastLinkerClassId === cls.id ? 'var(--accent-primary)' : 'var(--glass-node-btn-bg)',
-                border: cardFastLinkerClassId === cls.id ? '1px solid var(--accent-primary)' : '1px solid var(--glass-node-btn-border)',
-                borderRadius: '6px',
-                padding: '2px 7px',
-                color: cardFastLinkerClassId === cls.id ? '#ffffff' : 'var(--glass-node-btn-text)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '3px',
-                fontSize: '0.67rem',
-                fontWeight: 700,
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-                transition: 'all 0.15s ease'
-              }}
-              title="Enlazar con otra tabla UML"
-            >
-              <Link2 size={11} />
-              <span>Enlazar</span>
-            </button>
-          )}
-
+        <div style={{ display: isSelected ? 'flex' : 'none', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
           {canEdit && (
             <button
               onClick={e => {
@@ -629,40 +519,6 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         </div>
       </div>
 
-      {/* Línea divisoria entre compartimentos (UML 2.5+) */}
-      <div
-        style={{
-          width: '100%',
-          height: '1px',
-          background: 'var(--glass-node-header-border)',
-          margin: '0 -12px'
-        }}
-      />
-
-      {/* Barra de progreso de madurez (sutil, entre compartimentos) */}
-      <div
-        style={{
-          width: '100%',
-          height: '2px',
-          background: 'rgba(255, 255, 255, 0.08)',
-          position: 'relative',
-          overflow: 'hidden',
-          margin: '0 -12px'
-        }}
-        title={`Nivel de madurez: ${madurez.porcentaje}% (${madurez.nivel.replace('_', ' ')})`}
-      >
-        <div
-          style={{
-            width: `${madurez.porcentaje}%`,
-            height: '100%',
-            background: `linear-gradient(90deg, ${madurez.color}cc, ${madurez.color})`,
-            boxShadow: `0 0 6px ${madurez.color}99`,
-            borderRadius: '0 1px 1px 0',
-            transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
-          }}
-        />
-      </div>
-
       {/* ==================== COMPARTIMENTO 2: ATRIBUTOS (UML 2.5+) ==================== */}
       <div
         className="uml-compartment-attrs"
@@ -679,7 +535,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         {/* Encabezado de atributos solo si hay atributos o se puede editar */}
         {cls.attributes.length > 0 || canEdit ? (
           <div style={{
-            display: 'flex',
+            display: isSelected ? 'flex' : 'none',
             alignItems: 'center',
             justifyContent: 'space-between',
             marginBottom: '4px'
@@ -692,10 +548,10 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
               letterSpacing: '0.04em',
               flexShrink: 0
             }}>
-              Atributos ({cls.attributes.length})
+              {isSelected ? `Atributos (${cls.attributes.length})` : ''}
             </span>
 
-            {canEdit && (
+            {canEdit && isSelected && (
               <button
                 onClick={e => {
                   e.stopPropagation();
@@ -720,6 +576,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
           {cls.attributes.map(attr => (
             <div
               key={attr.id}
+              onDoubleClick={e => { e.stopPropagation(); if (canEdit) setEditingMember({ kind: 'attribute', id: attr.id }); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -728,8 +585,8 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
                 fontFamily: 'var(--font-mono)',
                 padding: '2px 6px',
                 borderRadius: '3px',
-                background: 'var(--glass-node-attr-item-bg)',
-                border: '1px solid var(--glass-node-attr-item-border)',
+                background: 'transparent',
+                border: '1px solid transparent',
                 minHeight: '20px'
               }}
             >
@@ -746,13 +603,14 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
                 </span>
                 <span style={{
                   color: 'var(--glass-node-attr-text)',
+                  textDecoration: attr.isStatic ? 'underline' : undefined,
                   fontWeight: 600,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                   minWidth: 0
                 }} title={attr.name}>
-                  {attr.name}
+                  {attr.isDerived ? '/' : ''}{attr.name}
                 </span>
                 {attr.isPrimaryKey && (
                   <span title="Clave Primaria (PK)" style={{ flexShrink: 0, marginLeft: '4px' }}>
@@ -761,10 +619,11 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
                 )}
                 {/* Separador de dos puntos UML */}
                 <span style={{ color: 'var(--text-subtle)', flexShrink: 0, marginLeft: '4px' }}>:</span>
-                <span style={{ color: '#e8c39e', fontWeight: 700, flexShrink: 0, marginLeft: '2px' }}>{attr.type}</span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600, flexShrink: 0, marginLeft: '2px' }}>{attr.type}{attr.multiplicity ? ` [${attr.multiplicity}]` : ''}{attr.defaultValue ? ` = ${attr.defaultValue}` : ''}{attr.isReadOnly ? ' {readOnly}' : ''}</span>
               </div>
 
-              {canEdit && (
+              {canEdit && isSelected && <button type="button" title="Editar atributo" aria-label={`Editar atributo ${attr.name}`} onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); setEditingMember({ kind: 'attribute', id: attr.id }); }} style={{ background: 'transparent', border: 0, color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}><Edit2 size={11} /></button>}
+              {canEdit && isSelected && (
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -947,24 +806,14 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         </div>
       </div>
 
-      {/* Línea divisoria entre atributos y métodos */}
-      <div
-        style={{
-          width: '100%',
-          height: '1px',
-          background: 'var(--glass-node-attr-border)',
-          margin: '0 -12px'
-        }}
-      />
-
       {/* ==================== COMPARTIMENTO 3: MÉTODOS / OPERACIONES (UML 2.5+) ==================== */}
       <div
         className="uml-compartment-methods"
         style={{
           padding: '9px 12px',
           background: 'var(--glass-node-method-bg)',
-          borderBottomLeftRadius: '11px',
-          borderBottomRightRadius: '11px',
+          borderBottomLeftRadius: '1px',
+          borderBottomRightRadius: '1px',
           minHeight: '34px',
           display: 'flex',
           flexDirection: 'column',
@@ -972,7 +821,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
         }}
       >
         <div style={{
-          display: 'flex',
+          display: isSelected ? 'flex' : 'none',
           alignItems: 'center',
           justifyContent: 'space-between',
           marginBottom: '4px'
@@ -985,11 +834,11 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
             letterSpacing: '0.04em',
             flexShrink: 0
           }}>
-            Operaciones ({cls.methods.length})
+            {isSelected ? `Operaciones (${cls.methods.length})` : ''}
           </span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {canEdit && madurez.porcentaje < 100 && onAutoCompletarClase && (
+            {canEdit && isSelected && madurez.porcentaje < 100 && onAutoCompletarClase && (
               <button
                 onClick={e => {
                   e.stopPropagation();
@@ -1016,7 +865,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
               </button>
             )}
 
-            {canEdit && (
+            {canEdit && isSelected && (
               <button
                 onClick={e => {
                   e.stopPropagation();
@@ -1041,6 +890,7 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
           {cls.methods.map(m => (
             <div
               key={m.id}
+              onDoubleClick={e => { e.stopPropagation(); if (canEdit) setEditingMember({ kind: 'method', id: m.id }); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1065,10 +915,11 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
                 }}>
                   {m.visibility}
                 </span>
-                <span style={{ color: 'var(--glass-node-attr-text)', fontWeight: 600 }}>{m.name}({m.parameters || ''})</span>: <span style={{ color: '#e8c39e', fontWeight: 700 }}>{m.returnType}</span>
+                <span style={{ color: 'var(--glass-node-attr-text)', fontWeight: 600, textDecoration: m.isStatic ? 'underline' : undefined, fontStyle: m.isAbstract ? 'italic' : undefined }}>{m.name}({m.parameters || ''}): {m.returnType}{m.isQuery ? ' {query}' : ''}</span>
               </div>
 
-              {onDeleteMethod && canEdit && (
+              {canEdit && isSelected && <button type="button" title="Editar operación" aria-label={`Editar operación ${m.name}`} onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); setEditingMember({ kind: 'method', id: m.id }); }} style={{ background: 'transparent', border: 0, color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}><Edit2 size={11} /></button>}
+              {onDeleteMethod && canEdit && isSelected && (
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -1197,180 +1048,6 @@ export const UmlNodeCard: React.FC<UmlNodeCardProps> = React.memo(function UmlNo
       </div>
 
 
-      {/* Conexiones de la tabla con otras clases (gestión manual directa) */}
-      {(() => {
-        const classRels = diagram.relations.filter(r => r.sourceClassId === cls.id || r.targetClassId === cls.id || r.associationClassId === cls.id);
-        if (classRels.length === 0) return null;
-
-        return (
-          <div
-            style={{
-              padding: '6px 12px 8px 12px',
-              borderTop: '1px solid var(--glass-node-attr-border)',
-              background: 'rgba(0, 0, 0, 0.04)',
-              borderBottomLeftRadius: '11px',
-              borderBottomRightRadius: '11px'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-              <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Conexiones ({classRels.length})
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-              {classRels.map(rel => {
-                const isAssocLink = rel.associationClassId === cls.id;
-                const isSource = rel.sourceClassId === cls.id;
-                const isSelectedRel = selectedRelationId === rel.id;
-
-                if (isAssocLink) {
-                  const sCls = diagram.classes.find(c => c.id === rel.sourceClassId);
-                  const tCls = diagram.classes.find(c => c.id === rel.targetClassId);
-                  const pairName = `${sCls?.name || 'A'} ↔ ${tCls?.name || 'B'}`;
-
-                  return (
-                    <div
-                      key={rel.id}
-                      onClick={e => {
-                        e.stopPropagation();
-                        setSelectedRelationId(rel.id);
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        fontSize: '0.70rem',
-                        padding: '3px 6px',
-                        borderRadius: '5px',
-                        background: isSelectedRel ? 'rgba(244, 63, 94, 0.18)' : 'rgba(232, 195, 158, 0.08)',
-                        border: isSelectedRel ? '1px solid rgba(244, 63, 94, 0.5)' : '1px solid rgba(232, 195, 158, 0.25)',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                      title="Enlace en T reglamentario (UML 2.5): Haz clic para seleccionar la asociación principal"
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <span style={{ color: '#e8c39e', fontWeight: 800 }}>⊥</span>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pairName}</span>
-                        <span style={{
-                          fontSize: '0.60rem',
-                          fontFamily: 'var(--font-mono)',
-                          background: 'rgba(232, 195, 158, 0.2)',
-                          color: '#e8c39e',
-                          padding: '1px 5px',
-                          borderRadius: '4px',
-                          fontWeight: 700
-                        }}>
-                          {rel.sourceMultiplicity || '*'} ↔ {rel.targetMultiplicity || '1..*'}
-                        </span>
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.63rem' }}>
-                          (Línea en T)
-                        </span>
-                      </div>
-                      {canEdit && (
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            onDeleteRelation(rel.id);
-                          }}
-                          title={`Eliminar asociación entre ${pairName}`}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#fb7185',
-                            cursor: 'pointer',
-                            padding: '2px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            borderRadius: '4px'
-                          }}
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                }
-
-                const otherId = isSource ? rel.targetClassId : rel.sourceClassId;
-                const otherCls = diagram.classes.find(c => c.id === otherId);
-                const otherName = otherCls ? otherCls.name : 'Desconocida';
-                const assocCls = rel.associationClassId ? diagram.classes.find(c => c.id === rel.associationClassId) : null;
-                return (
-                  <div
-                    key={rel.id}
-                    onClick={e => {
-                      e.stopPropagation();
-                      setSelectedRelationId(rel.id);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '0.70rem',
-                      padding: '3px 6px',
-                      borderRadius: '5px',
-                      background: isSelectedRel ? 'rgba(244, 63, 94, 0.18)' : 'var(--glass-surface)',
-                      border: isSelectedRel ? '1px solid rgba(244, 63, 94, 0.5)' : '1px solid var(--glass-border-color)',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                    title="Haz clic para seleccionar o presiona el icono de papelera para eliminar la conexión"
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <span style={{ color: isSource ? 'var(--accent-primary)' : '#60a5fa', fontWeight: 800 }}>
-                        {isSource ? '➔' : '⬅'}
-                      </span>
-                      <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{otherName}</span>
-                      {Boolean(rel.sourceMultiplicity || rel.targetMultiplicity) && (
-                        <span style={{
-                          fontSize: '0.62rem',
-                          fontFamily: 'var(--font-mono)',
-                          background: 'rgba(232, 195, 158, 0.16)',
-                          color: '#e8c39e',
-                          padding: '1px 5px',
-                          borderRadius: '4px',
-                          fontWeight: 700
-                        }}>
-                          {isSource
-                            ? `${rel.sourceMultiplicity || '1'} ➔ ${rel.targetMultiplicity || '*'}`
-                            : `${rel.targetMultiplicity || '*'} ⬅ ${rel.sourceMultiplicity || '1'}`}
-                        </span>
-                      )}
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.63rem' }}>
-                        ({rel.label || rel.type.replace('ASSOCIATION_', '').replace('_', ':')}{assocCls ? ` · ${assocCls.name}` : ''})
-                      </span>
-                    </div>
-                    {canEdit && (
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          onDeleteRelation(rel.id);
-                        }}
-                        title={`Eliminar conexión con ${otherName}`}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#fb7185',
-                          cursor: 'pointer',
-                          padding: '2px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: '4px'
-                        }}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 });

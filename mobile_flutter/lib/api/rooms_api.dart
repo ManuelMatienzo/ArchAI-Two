@@ -10,6 +10,15 @@ class DiagramData {
   DiagramData({required this.classes, required this.relationships});
 }
 
+class ProjectViewerEntry {
+  final ProjectDiagramSummary diagram;
+  final DiagramData data;
+  final String roomId;
+  final bool live;
+
+  ProjectViewerEntry({required this.diagram, required this.data, required this.roomId, required this.live});
+}
+
 class RoomsApi {
   static String normalizeRelationType(String? type) {
     final clean = (type ?? '').toLowerCase();
@@ -70,7 +79,7 @@ class RoomsApi {
   }
 
   static Future<List<ProjectItem>> listUserProjects(String userId) async {
-    try {
+    {
       if (userId.isEmpty) return [];
       final res = await ApiClient.request('/proyectos?usuarioId=${Uri.encodeComponent(userId)}');
       if (res is! List) return [];
@@ -86,16 +95,15 @@ class RoomsApi {
           final diags = await listProjectDiagrams(proj.id);
           return proj.copyWith(
             diagrams: diags,
-            totalDiagrams: diags.isNotEmpty ? diags.length : proj.totalDiagrams,
+            totalDiagrams: diags.length,
+            diagramsLoaded: true,
           );
         } catch (_) {
-          return proj;
+          return proj.copyWith(diagramsLoaded: false);
         }
       }));
 
       return enriched;
-    } catch (_) {
-      return [];
     }
   }
 
@@ -105,7 +113,7 @@ class RoomsApi {
       if (res is Map<String, dynamic>) {
         final proj = ProjectItem.fromJson(res, currentUserId);
         final diags = await listProjectDiagrams(projectId);
-        return proj.copyWith(diagrams: diags, totalDiagrams: diags.isNotEmpty ? diags.length : proj.totalDiagrams);
+        return proj.copyWith(diagrams: diags, totalDiagrams: diags.length, diagramsLoaded: true);
       }
       return null;
     } catch (_) {
@@ -114,132 +122,60 @@ class RoomsApi {
   }
 
   static Future<List<ProjectDiagramSummary>> listProjectDiagrams(String projectId) async {
-    try {
-      final res = await ApiClient.request('/diagramas?proyectoId=${Uri.encodeComponent(projectId)}');
-      if (res is List) {
-        return res
-            .whereType<Map<String, dynamic>>()
-            .map((item) => ProjectDiagramSummary.fromJson(item, projectId))
-            .toList();
+    final res = await ApiClient.request(
+      '/diagramas?proyectoId=${Uri.encodeComponent(projectId)}',
+      timeout: const Duration(seconds: 20),
+    );
+    if (res is! List) throw const FormatException('Lista de diagramas inválida');
+    return res.whereType<Map<String, dynamic>>()
+        .where((item) => item['id'] != null && item['id'].toString().isNotEmpty)
+        .map((item) => ProjectDiagramSummary.fromJson(item, projectId)).toList();
+  }
+
+  /// An empty or unavailable summary is reloaded before choosing a diagram.
+  static Future<ProjectDiagramSummary?> resolveProjectDiagram(
+    ProjectItem project, [ProjectDiagramSummary? selected]
+  ) async {
+    if (selected != null) return selected;
+    final diagrams = await listProjectDiagrams(project.id);
+    return diagrams.isEmpty ? null : diagrams.first;
+  }
+
+  /// Load the selected saved model first. A room conflict must not prevent viewing it.
+  static Future<ProjectViewerEntry?> prepareProjectViewer(
+    ProjectItem project, [ProjectDiagramSummary? selected]
+  ) async {
+    final roomId = project.codigoAcceso.isNotEmpty ? project.codigoAcceso : project.id;
+    if (selected == null) {
+      // El botón del proyecto abre el modelo activo, también antes de su guardado.
+      final room = await getRoomDetails(roomId);
+      if (room != null && room['projectId']?.toString() == project.id) {
+        try {
+          final live = await ApiClient.request('/colaboracion/salas/${Uri.encodeComponent(roomId)}/diagrama');
+          if (live is Map<String, dynamic> && live['classes'] is List) {
+            return ProjectViewerEntry(
+              diagram: ProjectDiagramSummary(id: room['diagramId']?.toString() ?? '', projectId: project.id,
+                  title: live['title']?.toString() ?? project.name, updatedAt: ''),
+              data: parseBackendDiagram(live), roomId: roomId, live: true,
+            );
+          }
+        } catch (_) {
+          // La lista guardada sigue siendo una alternativa si la sala no responde.
+        }
       }
-      return [];
-    } catch (_) {
-      return [];
     }
-  }
-
-  static Future<ProjectDiagramSummary> createDiagram({
-    required String projectId,
-    required String title,
-    required String userId,
-  }) async {
-    final res = await ApiClient.request(
-      '/diagramas',
-      method: 'POST',
-      body: {
-        'title': title.trim(),
-        'proyectoId': projectId,
-        'creadorId': userId,
-        'classes': [],
-        'relations': [],
-      },
-    );
-    return ProjectDiagramSummary.fromJson(res as Map<String, dynamic>, projectId);
-  }
-
-  static Future<bool> deleteDiagram(String diagramId) async {
+    final diagram = await resolveProjectDiagram(project, selected);
+    if (diagram == null) return null;
+    final data = await getRoomDiagram(roomId, project.id, diagram.id);
     try {
-      await ApiClient.request(
-        '/diagramas/${Uri.encodeComponent(diagramId)}',
-        method: 'DELETE',
-      );
-      return true;
+      final room = await openDiagramRoom(diagram.id, roomId);
+      return ProjectViewerEntry(diagram: diagram, data: data,
+          roomId: room['roomId']?.toString() ?? roomId, live: true);
     } catch (_) {
-      return false;
+      // The project room can already belong to a different diagram. Viewing the
+      // authorized saved model must not switch that room or display another model.
+      return ProjectViewerEntry(diagram: diagram, data: data, roomId: roomId, live: false);
     }
-  }
-
-  static Future<ProjectMemberItem> inviteMember({
-    required String projectId,
-    required String emailOrUsername,
-    String role = 'EDITOR',
-  }) async {
-    final res = await ApiClient.request(
-      '/proyectos/${Uri.encodeComponent(projectId)}/miembros',
-      method: 'POST',
-      body: {
-        'correoOUsuario': emailOrUsername.trim(),
-        'rolProyecto': role,
-      },
-    );
-    return ProjectMemberItem.fromJson(res as Map<String, dynamic>);
-  }
-
-  static Future<bool> removeMember(String projectId, String userId) async {
-    try {
-      await ApiClient.request(
-        '/proyectos/${Uri.encodeComponent(projectId)}/miembros/${Uri.encodeComponent(userId)}',
-        method: 'DELETE',
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<ProjectItem> createProject({
-    required String name,
-    required String description,
-    required String ownerId,
-    String? color,
-  }) async {
-    final res = await ApiClient.request(
-      '/proyectos',
-      method: 'POST',
-      body: {
-        'nombre': name.trim(),
-        'descripcion': description.trim(),
-        'iconoColor': color ?? '#38BDF8',
-        'propietarioId': ownerId,
-      },
-    );
-    return ProjectItem.fromJson(res as Map<String, dynamic>, ownerId);
-  }
-
-  static Future<bool> deleteProject(String projectId) async {
-    try {
-      await ApiClient.request(
-        '/proyectos/${Uri.encodeComponent(projectId)}',
-        method: 'DELETE',
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<bool> leaveProject(String projectId, String userId) async {
-    try {
-      await ApiClient.request(
-        '/proyectos/${Uri.encodeComponent(projectId)}/miembros/${Uri.encodeComponent(userId)}',
-        method: 'DELETE',
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<ProjectItem> joinProjectByCode(String code, String userId) async {
-    final res = await ApiClient.request(
-      '/proyectos/unirse',
-      method: 'POST',
-      body: {
-        'codigoAcceso': code.trim().toUpperCase(),
-        'usuarioId': userId.trim(),
-      },
-    );
-    return ProjectItem.fromJson(res as Map<String, dynamic>, userId);
   }
 
   static Future<List<Map<String, dynamic>>> listActiveRooms([String? userId]) async {
@@ -287,24 +223,6 @@ class RoomsApi {
     }
   }
 
-  static Future<Map<String, dynamic>> createRoom(String roomName, UserModel host, [String? pin]) async {
-    final res = await ApiClient.request(
-      '/colaboracion/salas',
-      method: 'POST',
-      body: {
-        'nombreSala': roomName.trim().isNotEmpty ? roomName.trim() : 'Nueva Sala de Arquitectura',
-        'anfitrion': {
-          'id': host.id,
-          'name': host.name,
-          'email': host.email,
-          'role': host.role,
-        },
-        if (pin != null && pin.trim().isNotEmpty) 'pin': pin.trim().toUpperCase(),
-      },
-    );
-    return res as Map<String, dynamic>;
-  }
-
   static Future<Map<String, dynamic>> joinRoom(String pin, UserModel user) async {
     final res = await ApiClient.request(
       '/colaboracion/salas/unirse',
@@ -319,7 +237,24 @@ class RoomsApi {
         },
       },
     );
-    return res as Map<String, dynamic>;
+    final room = Map<String, dynamic>.from(res as Map);
+    final projectId = room['projectId']?.toString();
+    if (projectId != null && projectId.isNotEmpty) {
+      try {
+        final project = await ApiClient.request('/proyectos/${Uri.encodeComponent(projectId)}');
+        if (project is Map) {
+          final code = (project['codigoAcceso'] ?? project['codigo'] ?? project['code'])?.toString().trim().toUpperCase();
+          final normalizedPin = pin.trim().toUpperCase();
+          String normalized(String value) => value.startsWith('ARC-') ? value : 'ARC-$value';
+          if (code != null && code.isNotEmpty && normalized(code) == normalized(normalizedPin)) {
+            room['roomId'] = code;
+          }
+        }
+      } catch (_) {
+        // Los invitados por PIN pueden no tener acceso al detalle del proyecto.
+      }
+    }
+    return room;
   }
 
   static Future<Map<String, dynamic>> openDiagramRoom(String diagramId, String roomId) async {
@@ -330,34 +265,6 @@ class RoomsApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
-  static Future<bool> leaveRoom(String pin, String userId) async {
-    try {
-      await ApiClient.request(
-        '/colaboracion/salas/${Uri.encodeComponent(pin)}/salir?usuarioId=${Uri.encodeComponent(userId)}',
-        method: 'POST',
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<DiagramData> getProjectDiagram(String projectId) async {
-    try {
-      final diagrams = await ApiClient.request('/diagramas?proyectoId=${Uri.encodeComponent(projectId)}');
-      if (diagrams is List && diagrams.isNotEmpty) {
-        final target = diagrams.firstWhere(
-          (d) => d is Map && d['classes'] is List && (d['classes'] as List).isNotEmpty,
-          orElse: () => diagrams.first,
-        );
-        return parseBackendDiagram(target);
-      }
-      return DiagramData(classes: [], relationships: []);
-    } catch (_) {
-      return DiagramData(classes: [], relationships: []);
-    }
-  }
-
   static Future<DiagramData> getRoomDiagram(String pin, [String? projectId, String? diagramId]) async {
     // An explicitly selected diagram must never fall back to another diagram.
     if (diagramId != null && diagramId.isNotEmpty) {
@@ -365,14 +272,18 @@ class RoomsApi {
       if (data is! Map || data['classes'] is! List) throw const FormatException('Diagrama inválido');
       return parseBackendDiagram(data);
     }
+    try {
+      final live = await ApiClient.request('/colaboracion/salas/${Uri.encodeComponent(pin)}/diagrama');
+      if (live is Map && live['classes'] is List) return parseBackendDiagram(live);
+    } catch (_) {
+      // Una sala aún no disponible puede tener un diagrama guardado.
+    }
     if (projectId != null && projectId.isNotEmpty) {
       final diagrams = await ApiClient.request('/diagramas?proyectoId=${Uri.encodeComponent(projectId)}');
       if (diagrams is! List) throw const FormatException('Lista de diagramas inválida');
       if (diagrams.isNotEmpty) return parseBackendDiagram(diagrams.first);
     }
-    final data = await ApiClient.request('/colaboracion/salas/${Uri.encodeComponent(pin)}/diagrama');
-    if (data is! Map || data['classes'] is! List) throw const FormatException('Diagrama inválido');
-    return parseBackendDiagram(data);
+    throw const FormatException('Diagrama no disponible');
   }
 
   static Future<List<GhostDraftProposal>> getGhostDrafts(String roomId) async {

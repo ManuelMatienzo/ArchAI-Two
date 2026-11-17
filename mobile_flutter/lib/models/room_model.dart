@@ -105,6 +105,7 @@ class ProjectItem {
   final int totalDiagrams;
   final List<ProjectMemberItem> members;
   final List<ProjectDiagramSummary> diagrams;
+  final bool diagramsLoaded;
 
   ProjectItem({
     required this.id,
@@ -118,9 +119,10 @@ class ProjectItem {
     required this.updatedAt,
     this.isOwner = false,
     this.memberCount = 1,
-    this.totalDiagrams = 1,
+    this.totalDiagrams = 0,
     this.members = const [],
     this.diagrams = const [],
+    this.diagramsLoaded = false,
   });
 
   factory ProjectItem.fromJson(Map<String, dynamic> json, [String? currentUserId]) {
@@ -166,9 +168,10 @@ class ProjectItem {
       updatedAt: json['fechaActualizacion']?.toString() ?? json['updatedAt']?.toString() ?? 'Reciente',
       isOwner: isOwn,
       memberCount: mCount,
-      totalDiagrams: (json['totalDiagramas'] as num?)?.toInt() ?? (parsedDiags.isNotEmpty ? parsedDiags.length : 1),
+      totalDiagrams: (json['totalDiagramas'] as num?)?.toInt() ?? parsedDiags.length,
       members: parsedMembers,
       diagrams: parsedDiags,
+      diagramsLoaded: rawDiags != null,
     );
   }
 
@@ -187,6 +190,7 @@ class ProjectItem {
     int? totalDiagrams,
     List<ProjectMemberItem>? members,
     List<ProjectDiagramSummary>? diagrams,
+    bool? diagramsLoaded,
   }) {
     return ProjectItem(
       id: id ?? this.id,
@@ -203,6 +207,7 @@ class ProjectItem {
       totalDiagrams: totalDiagrams ?? this.totalDiagrams,
       members: members ?? this.members,
       diagrams: diagrams ?? this.diagrams,
+      diagramsLoaded: diagramsLoaded ?? this.diagramsLoaded,
     );
   }
 
@@ -322,9 +327,9 @@ class CollabMessage {
   factory CollabMessage.fromJson(Map<String, dynamic> json) {
     DateTime ts;
     try {
-      ts = json['timestamp'] != null 
-          ? DateTime.parse(json['timestamp'].toString()) 
-          : DateTime.now();
+      final raw = json['createdAt'] ?? json['timestamp'];
+      ts = raw is num ? DateTime.fromMillisecondsSinceEpoch(raw.toInt())
+          : raw != null ? DateTime.parse(raw.toString()).toLocal() : DateTime.now();
     } catch (_) {
       ts = DateTime.now();
     }
@@ -336,11 +341,11 @@ class CollabMessage {
 
     return CollabMessage(
       id: json['id']?.toString() ?? 'msg-${DateTime.now().millisecondsSinceEpoch}',
-      sender: json['sender']?.toString() ?? json['usuario']?.toString() ?? 'Anónimo',
+      sender: json['authorName']?.toString() ?? json['sender']?.toString() ?? json['usuario']?.toString() ?? 'Anónimo',
       text: json['text']?.toString() ?? json['mensaje']?.toString() ?? json['content']?.toString() ?? '',
       timestamp: ts,
-      isAi: json['isAi'] == true || json['esIa'] == true,
-      isSystem: json['isSystem'] == true || json['esSistema'] == true,
+      isAi: json['isAi'] == true || json['esIa'] == true || json['role'] == 'ai',
+      isSystem: json['isSystem'] == true || json['esSistema'] == true || json['role'] == 'system',
       proposalId: json['proposalId']?.toString(),
       senderRole: json['senderRole']?.toString() ?? json['rol']?.toString(),
       codeSnippet: snippet,

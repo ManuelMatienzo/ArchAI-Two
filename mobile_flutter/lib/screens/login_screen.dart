@@ -123,22 +123,10 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      UserSession session;
-      if (_isLoginMode) {
-        try {
-          session = await AuthApi.login(email, pass);
-        } catch (_) {
-          // Fallback resiliente offline si el servidor está inaccesible temporalmente
-          session = await AuthApi.loginOffline(email, _selectedRole);
-        }
-      } else {
+      if (!_isLoginMode) {
         await AuthApi.register(name, email, pass, _selectedRole);
-        try {
-          session = await AuthApi.login(email, pass);
-        } catch (_) {
-          session = await AuthApi.loginOffline(email, _selectedRole);
-        }
       }
+      final UserSession session = await AuthApi.login(email, pass);
 
       if (mounted) {
         Navigator.of(context).pushReplacement(

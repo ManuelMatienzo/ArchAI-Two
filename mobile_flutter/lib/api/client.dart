@@ -48,6 +48,17 @@ class ApiClient {
 
     final cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/$endpoint';
     final uri = Uri.parse('$baseUrl$cleanEndpoint');
+    final verb = method.toUpperCase();
+    // Authentication and entering a room establish access/presence; they do not
+    // edit a project or its diagram. All other writes are disabled on mobile.
+    const accessRequests = {
+      '/auth/login', '/auth/registro',
+      '/colaboracion/salas/unirse', '/colaboracion/salas/abrir',
+    };
+    final isAccessRequest = verb == 'POST' && accessRequests.contains(Uri.parse(cleanEndpoint).path);
+    if (verb != 'GET' && !isAccessRequest) {
+      throw ApiError(403, 'Esta aplicación permite consultar los proyectos.');
+    }
 
     final requestHeaders = <String, String>{
       'Content-Type': 'application/json',
@@ -84,7 +95,7 @@ class ApiClient {
       throw ApiError(0, 'No se pudo conectar con el servidor. Revisa tu conexión de red.');
     } catch (e) {
       if (e is ApiError) rethrow;
-      throw ApiError(0, 'Error de conexión: $e');
+      throw ApiError(0, 'No se pudo conectar con el servidor. Intenta de nuevo más tarde.');
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {

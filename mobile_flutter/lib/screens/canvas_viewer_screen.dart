@@ -30,6 +30,7 @@ class CanvasViewerScreen extends StatefulWidget {
   final String? diagramId;
   final List<UmlClass>? initialClasses;
   final List<UmlRelationship>? initialRelationships;
+  final bool enableLiveSync;
 
   const CanvasViewerScreen({
     super.key,
@@ -40,6 +41,7 @@ class CanvasViewerScreen extends StatefulWidget {
     this.diagramId,
     this.initialClasses,
     this.initialRelationships,
+    this.enableLiveSync = true,
   });
 
   @override
@@ -84,12 +86,18 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
       _classes = List.from(widget.initialClasses!);
       _relationships = List.from(widget.initialRelationships ?? []);
       _isLoading = false;
+      if (_classes.isNotEmpty) {
+        _hasFitted = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _centerCanvas();
+        });
+      }
     }
 
     _initDiagram();
     _setupStomp();
     _startBackgroundPolling();
-    _setupLiveNotifications();
+    if (widget.enableLiveSync) _setupLiveNotifications();
   }
 
   @override
@@ -106,8 +114,10 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
     _unsubGhost?.call();
     _unsubChat?.call();
 
-    MobileStompClient.instance.sendLeave(widget.roomId, widget.session.user);
-    MobileStompClient.instance.unsubscribeRoom(widget.roomId);
+    if (widget.enableLiveSync) {
+      MobileStompClient.instance.sendLeave(widget.roomId, widget.session.user);
+      MobileStompClient.instance.unsubscribeRoom(widget.roomId);
+    }
 
     _transformationController.dispose();
     super.dispose();
@@ -161,7 +171,16 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
 
     final revision = _liveRevision;
     try {
-      final data = await RoomsApi.getRoomDiagram(widget.roomId, widget.projectId, widget.diagramId);
+      DiagramData data;
+      if (widget.enableLiveSync) {
+        try {
+          data = await RoomsApi.getRoomDiagram(widget.roomId);
+        } catch (_) {
+          data = await RoomsApi.getRoomDiagram(widget.roomId, widget.projectId, widget.diagramId);
+        }
+      } else {
+        data = await RoomsApi.getRoomDiagram(widget.roomId, widget.projectId, widget.diagramId);
+      }
       if (mounted && revision == _liveRevision) {
         _applyUpdatedDiagram(data.classes, data.relationships);
       }
@@ -206,25 +225,18 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
     if (widget.roomId == 'SANDBOX-OFFLINE') return;
 
     // Dual Sync: 1.5-second background polling
-    _pollingTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
-      if (mounted && !MobileStompClient.instance.isConnected) {
+    _pollingTimer = Timer.periodic(
+        widget.enableLiveSync ? const Duration(milliseconds: 1500) : const Duration(seconds: 10), (_) {
+      if (mounted && (!widget.enableLiveSync || !MobileStompClient.instance.isConnected)) {
         _fetchDiagramFromBackend();
       }
     });
   }
 
   void _setupStomp() {
-    if (widget.roomId == 'SANDBOX-OFFLINE') return;
+    if (!widget.enableLiveSync || widget.roomId == 'SANDBOX-OFFLINE') return;
 
     final stomp = MobileStompClient.instance;
-
-    unawaited(stomp.connect(
-      onConnect: () {
-        if (!mounted) return;
-        stomp.sendJoin(widget.roomId, widget.session.user);
-        stomp.sendSolicitarDiagrama(widget.roomId, widget.session.user);
-      },
-    ).catchError((_) {}));
 
     // Subscribe to Collab topic (Real-time nodo_mover, sync)
     _unsubCollab = stomp.subscribeRoomCollab(widget.roomId, (data) {
@@ -284,6 +296,15 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
       if (!mounted) return;
       setState(() => _unreadChatCount++);
     });
+
+    // Suscribir antes de solicitar el modelo también cuando ya hay conexión.
+    unawaited(stomp.connect(
+      onConnect: () {
+        if (!mounted) return;
+        stomp.sendJoin(widget.roomId, widget.session.user);
+        stomp.sendSolicitarDiagrama(widget.roomId, widget.session.user);
+      },
+    ).catchError((_) {}));
   }
 
   void _handleRemoteNodeMove(String nodoId, double x, double y, String userName) {
@@ -405,6 +426,10 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
                 );
               },
               onOpenChat: () {
+                if (!widget.enableLiveSync) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El chat no está disponible para este diagrama.')));
+                  return;
+                }
                 setState(() => _unreadChatCount = 0);
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -412,6 +437,7 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
                       session: widget.session,
                       roomId: widget.roomId,
                       roomName: widget.roomName,
+                      diagramId: widget.diagramId,
                       classes: _classes,
                       relationships: _relationships,
                     ),
@@ -500,7 +526,7 @@ class _CanvasViewerScreenState extends State<CanvasViewerScreen> {
                                     ),
                                   ),
 
-                                  // 2. Class cards layer with interactive real-time dragging
+                                  // 2. Read-only class cards; positions arrive from collaborators.
                                   ..._classes.map((c) {
                                     final isHighlight = c.id == _highlightedClassId;
                                     final draggingUser = _remoteDraggingUsers[c.id];

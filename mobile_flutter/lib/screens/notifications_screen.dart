@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../models/auth_model.dart';
+import '../api/rooms_api.dart';
 import '../models/notification_model.dart';
 import '../services/notifications_service.dart';
 import '../theme/app_colors.dart';
@@ -67,20 +68,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Future<void> _handleTapNotification(TeamNotification notif) async {
-    await NotificationsService.instance.markNotificationRead(notif.id);
-    _loadNotifications(silent: true);
-
-    if (!mounted) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CanvasViewerScreen(
-          session: widget.session,
-          roomId: notif.roomId,
-          roomName: 'Sala ${notif.roomId}',
-        ),
-      ),
-    );
+    if (notif.roomId.isEmpty) return;
+    try {
+      final room = await RoomsApi.joinRoom(notif.roomId, widget.session.user);
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => CanvasViewerScreen(
+        session: widget.session,
+        roomId: room['roomId']?.toString() ?? notif.roomId,
+        roomName: room['roomName']?.toString() ?? 'Sala ${notif.roomId}',
+        projectId: room['projectId']?.toString(),
+        diagramId: room['diagramId']?.toString(),
+      )));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir la sala. Intenta de nuevo.')));
+      }
+    }
   }
 
   @override

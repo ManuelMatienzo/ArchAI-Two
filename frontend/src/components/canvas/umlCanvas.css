@@ -1,0 +1,13 @@
+.uml-class-node .uml-connection-handle {
+  position: absolute; width: 10px; height: 10px; padding: 0;
+  border: 1px solid var(--accent-primary); border-radius: 50%;
+  background: var(--glass-node-bg); opacity: 0; pointer-events: none;
+  cursor: crosshair; z-index: 4;
+}
+.uml-class-node:hover .uml-connection-handle,
+.uml-class-node.node-selected .uml-connection-handle,
+.uml-class-node .uml-connection-handle:focus-visible { opacity: 1; pointer-events: auto; }
+.uml-connection-handle--top { left: calc(50% - 5px); top: -5px; }
+.uml-connection-handle--right { right: -5px; top: calc(50% - 5px); }
+.uml-connection-handle--bottom { left: calc(50% - 5px); bottom: -5px; }
+.uml-connection-handle--left { left: -5px; top: calc(50% - 5px); }

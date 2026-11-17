@@ -16,6 +16,23 @@ public class PersistenciaPropuesta {
     private final ServicioDiagrama versiones;
     private final com.archai.modulo.persistencia.servicio.AlmacenDocumental documentos;
 
+    /** Guarda el estado de la sala solo si nadie cambió el registro desde su lectura. */
+    @Transactional
+    public boolean guardarAutomatico(String id, ObjectNode modelo, String esperado) {
+        var entidad = diagramas.findForUpdate(id).orElseThrow();
+        try {
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            if (!mapper.readTree(entidad.getJsonDiagrama()).equals(mapper.readTree(esperado))) return false;
+        } catch (java.io.IOException ex) {
+            throw new IllegalStateException("No se pudo recuperar el diagrama guardado.", ex);
+        }
+        entidad.setJsonDiagrama(modelo.toString());
+        entidad.setTitulo(modelo.path("title").asText(entidad.getTitulo()));
+        entidad.setFechaActualizacion(LocalDateTime.now());
+        diagramas.saveAndFlush(entidad);
+        return true;
+    }
+
     @Transactional
     public void guardarConSesion(
         String id,

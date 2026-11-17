@@ -46,7 +46,7 @@ class TeamNotification {
 
     return TeamNotification(
       id: json['id']?.toString() ?? 'notif-${DateTime.now().millisecondsSinceEpoch}',
-      roomId: json['roomId']?.toString() ?? json['salaId']?.toString() ?? 'ARC-GRUPO04',
+      roomId: json['roomId']?.toString() ?? json['salaId']?.toString() ?? '',
       diagramId: json['diagramId']?.toString() ?? '',
       type: json['type']?.toString() ?? json['tipo']?.toString() ?? 'ACTIVIDAD',
       title: json['title']?.toString() ?? json['titulo']?.toString() ?? 'Novedad del proyecto',

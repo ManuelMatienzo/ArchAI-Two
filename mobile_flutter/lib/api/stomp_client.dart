@@ -272,16 +272,7 @@ class MobileStompClient {
         final tipo = data['tipo']?.toString();
         if ((tipo == 'chat' || tipo == 'chat_message') && data['payload'] is Map) {
           final p = data['payload'] as Map<String, dynamic>;
-          final msg = CollabMessage(
-            id: p['id']?.toString() ?? 'msg-${DateTime.now().millisecondsSinceEpoch}',
-            sender: p['authorName']?.toString() ?? p['sender']?.toString() ?? 'Compañero',
-            text: p['text']?.toString() ?? p['content']?.toString() ?? '',
-            timestamp: DateTime.now(),
-            isAi: p['isAi'] == true || p['role'] == 'ai' || p['isAiResponse'] == true,
-            isSystem: p['isSystemNotification'] == true,
-            proposalId: p['proposalId']?.toString(),
-            payload: p,
-          );
+          final msg = CollabMessage.fromJson(p);
           callback(msg);
         }
       }
@@ -341,40 +332,6 @@ class MobileStompClient {
         _client!.send(destination: '/app/collab/$roomId', body: body);
       } catch (_) {}
     }
-  }
-
-  void sendNodoMover(String roomId, String nodoId, double x, double y, UserModel user) {
-    if (roomId.isEmpty || roomId == 'SANDBOX-OFFLINE' || roomId == 'ARC-OFFLINE') return;
-    final body = jsonEncode({
-      'salaId': roomId,
-      'tipo': 'nodo_mover',
-      'emisorId': getCompositeSenderId(user.id),
-      'emisorNombre': user.name,
-      'payload': {
-        'id': nodoId,
-        'nodoId': nodoId,
-        'x': x,
-        'y': y,
-        'usuario': user.name,
-      },
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    });
-
-    _sendOrQueue('/app/collab/$roomId', body);
-  }
-
-  void sendChatMessage(String roomId, CollabMessage message, [UserModel? user]) {
-    final senderId = user != null ? getCompositeSenderId(user.id) : message.sender;
-    final backendPayload = jsonEncode({
-      'salaId': roomId,
-      'tipo': 'chat',
-      'emisorId': senderId,
-      'emisorNombre': message.sender,
-      'payload': {...message.toJson(), 'content': message.text, 'senderId': user?.id ?? senderId},
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    });
-
-    _sendOrQueue('/app/collab/$roomId', backendPayload);
   }
 
   void _sendOrQueue(String destination, String body) {

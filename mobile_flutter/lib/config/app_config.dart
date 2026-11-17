@@ -9,7 +9,7 @@ class AppConfig {
   // Configurable compile-time or Wi-Fi IP
   static const String defaultHost = String.fromEnvironment(
     'ARCHAI_HOST',
-    defaultValue: '192.168.1.7',
+    defaultValue: '192.168.0.144',
   );
 
   static String getDefaultBackendUrl() {

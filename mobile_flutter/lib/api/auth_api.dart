@@ -85,7 +85,13 @@ class AuthApi {
     if (jsonStr == null || jsonStr.isEmpty) return null;
     try {
       final map = jsonDecode(jsonStr);
-      return UserSession.fromJson(map);
+      final session = UserSession.fromJson(map);
+      // Las sesiones locales antiguas no identifican a un usuario del servidor.
+      if (session.token == 'mock-offline-token') {
+        await logout();
+        return null;
+      }
+      return session;
     } catch (_) {
       return null;
     }

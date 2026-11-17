@@ -25,7 +25,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { InformacionSesion } from '../../types/auth';
 import { ModeloDiagrama } from '../../types/uml';
-import { ApiError, listarProyectos, listarDiagramas, guardarDiagramaEnNube, crearProyecto, unirseProyectoPorCodigo, Proyecto } from '../../services/api';
+import { ApiError, listarProyectos, listarDiagramas, obtenerDiagrama, guardarDiagramaEnNube, crearProyecto, unirseProyectoPorCodigo, Proyecto } from '../../services/api';
 import { mergeProjectDiagrams, DiagramaResumen } from '../../services/projectDiagrams';
 import { obtenerDiagramaPorId } from '../../services/diagramasPredefinidos';
 import { GlassModal } from '../../components/glass/GlassModal';
@@ -336,6 +336,37 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     setTimeout(() => setMensajeExito(null), 3000);
   };
 
+  // Los modelos creados por versiones anteriores pueden existir solo en este navegador.
+  // Recuperarlos con su identificador anterior antes de abrir la sala evita perder el trabajo.
+  const abrirDiagramaProyecto = async (proyecto: Proyecto, diag?: DiagramaResumen) => {
+    const id = diag?.id || `diag-${proyecto.id}`;
+    const title = diag?.titulo || proyecto.nombre;
+    try {
+      let model = diag?.data;
+      try {
+        const saved = await obtenerDiagrama(id);
+        if (saved.proyectoId && saved.proyectoId !== proyecto.id) {
+          throw new Error('El diagrama pertenece a otro proyecto.');
+        }
+        if (!saved.proyectoId) {
+          const { diagramaDesdeBackend } = await import('../../services/api');
+          await guardarDiagramaEnNube(diagramaDesdeBackend(saved), proyecto.id, session.currentUser.id, id);
+        }
+      } catch (error) {
+        if (!(error instanceof ApiError && error.status === 404)) throw error;
+        try {
+          const cached = JSON.parse(localStorage.getItem(`archai_diagram_${id}`) || 'null');
+          if (Array.isArray(cached?.classes) && Array.isArray(cached?.relations)) model = cached;
+        } catch { /* Se conserva el modelo disponible del proyecto. */ }
+        model ||= { title, classes: [], relations: [], updatedAt: new Date().toISOString() };
+        await guardarDiagramaEnNube(model, proyecto.id, session.currentUser.id, id);
+      }
+      onOpenStudio(model, title, id, proyecto.codigoAcceso);
+    } catch (error) {
+      notificar(error instanceof Error ? error.message : 'No se pudo abrir el diagrama. Intenta de nuevo.');
+    }
+  };
+
   /** Importar proyecto desde archivo nativo .archai.json o .json */
   const handleImportarArchivo = async () => {
     try {
@@ -589,19 +620,13 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
           if (scrollContainer) scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onOpenStudio={() => {
-          const primerDiagMeta = proyectos[0]?.diagramas?.[0];
-          const diagId = primerDiagMeta?.id || 'diag-core-mvc';
-          const diagTitulo = primerDiagMeta?.titulo || 'Sistema de Comercio Electrónico v1.2';
-          const diagModelo = primerDiagMeta?.data || obtenerDiagramaPorId(diagId, diagTitulo);
-          onOpenStudio(diagModelo, diagTitulo, diagId, proyectos[0]?.codigoAcceso);
+          const proyecto = proyectos[0];
+          if (proyecto) void abrirDiagramaProyecto(proyecto, proyecto.diagramas?.[0]);
         }}
         onSelectTab={(tab) => {
           if (tab === 'canvas') {
-            const primerDiagMeta = proyectos[0]?.diagramas?.[0];
-            const diagId = primerDiagMeta?.id || 'diag-core-mvc';
-            const diagTitulo = primerDiagMeta?.titulo || 'Sistema de Comercio Electrónico v1.2';
-            const diagModelo = primerDiagMeta?.data || obtenerDiagramaPorId(diagId, diagTitulo);
-            onOpenStudio(diagModelo, diagTitulo, diagId, proyectos[0]?.codigoAcceso);
+            const proyecto = proyectos[0];
+            if (proyecto) void abrirDiagramaProyecto(proyecto, proyecto.diagramas?.[0]);
           } else if (tab === 'team') {
             navigate('/team');
           } else if (tab === 'settings') {
@@ -1245,7 +1270,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
                         >
                           {/* Clic en título abre el estudio con su arquitectura de dominio dedicada */}
                           <div
-onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id, proyecto.codigoAcceso)}
+onClick={() => void abrirDiagramaProyecto(proyecto, diag)}
                             style={{
                               display: 'flex',
                               alignItems: 'center',
@@ -1320,7 +1345,7 @@ onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.tit
                               <Trash2 size={11} />
                             </button>
                             <button
-onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.titulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion })), diag.titulo, diag.id, proyecto.codigoAcceso)}
+onClick={() => void abrirDiagramaProyecto(proyecto, diag)}
                               style={{
                                 background: 'transparent',
                                 border: 'none',
@@ -1356,10 +1381,7 @@ onClick={() => onOpenStudio((diag.data || obtenerDiagramaPorId(diag.id, diag.tit
               }}>
                 <button
                   onClick={() => {
-                    const primerDiag = proyecto.diagramas?.[0];
-                    const diagId = primerDiag?.id || `diag-${proyecto.id}`;
-                    const diagTitulo = primerDiag?.titulo || proyecto.nombre;
-onOpenStudio(primerDiag?.data || obtenerDiagramaPorId(diagId, diagTitulo, { nombre: proyecto.nombre, descripcion: proyecto.descripcion }), diagTitulo, diagId, proyecto.codigoAcceso);
+                    void abrirDiagramaProyecto(proyecto, proyecto.diagramas?.[0]);
                   }}
                   style={{
                     flex: 1,

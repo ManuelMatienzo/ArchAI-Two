@@ -63,6 +63,7 @@ public class ControladorDiagrama {
                 "No se puede cambiar el proyecto del diagrama durante el guardado."
             );
             if (actual.getProyecto() != null) diagram.setProyectoId(actual.getProyecto().getId());
+            else if (diagram.getProyectoId() != null) acceso.proyecto(diagram.getProyectoId(), user, true, false);
         } else if (diagram.getProyectoId() != null) acceso.proyecto(diagram.getProyectoId(), user, true, false);
         return ResponseEntity.ok(servicioDiagrama.guardarDiagrama(diagram));
     }

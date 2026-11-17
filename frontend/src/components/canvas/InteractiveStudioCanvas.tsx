@@ -1,3 +1,4 @@
+import { UmlMultiplicityInput } from './UmlMultiplicityInput';
 import { DraftDiagram } from '../../services/proposalDraft';
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
@@ -54,7 +55,7 @@ interface InteractiveStudioCanvasProps {
   session: InformacionSesion;
   selectedClassId: string | null;
   onSelectClass: (classId: string | null) => void;
-  onUpdateDiagram: (diagram: ModeloDiagrama) => void;
+  onUpdateDiagram: (diagram: ModeloDiagrama | ((previous: ModeloDiagrama) => ModeloDiagrama)) => void;
   onAddClass: (newClass: ClaseUml) => void;
   onDeleteClass: (classId: string) => void;
   onAddAttribute: (classId: string, attr: AtributoUml) => void;
@@ -355,6 +356,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
   // Helper unificado para eliminar relaciones de forma segura (con callback o directo al modelo)
   const handleDeleteRelationSafe = (relationId: string) => {
+    if (userPermissions && !userPermissions.canEditDiagram) return;
     if (onDeleteRelation) {
       onDeleteRelation(relationId);
     } else {
@@ -1109,7 +1111,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     let finalPos = dragPosRef.current;
 
     // Si había un movimiento en buffer pendiente de rAF, computar la posición exacta final ahora en coordenadas de mundo
-    if (!finalPos && lastMoveRef.current && targetClassId) {
+    if (lastMoveRef.current && targetClassId) {
       const data = lastMoveRef.current;
       const mX = data.clientX - data.left;
       const mY = data.clientY - data.top;
@@ -1126,39 +1128,40 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
     if (targetClassId && finalPos) {
       const SNAP = 8;
-      let updatedClasses = diagram.classes;
+      const position = finalPos;
+      const selected = new Set(selectedClassIdsRef.current);
+      const origins = new Map(multiDragInitialPositionsRef.current);
+      const initial = origins.get(targetClassId);
+      const deltaX = initial ? position.x - initial.x : 0;
+      const deltaY = initial ? position.y - initial.y : 0;
 
-      if (selectedClassIdsRef.current.size > 1 && selectedClassIdsRef.current.has(targetClassId) && multiDragDeltaRef.current) {
-        const { deltaX, deltaY } = multiDragDeltaRef.current;
-        updatedClasses = diagram.classes.map(c => {
-          if (selectedClassIdsRef.current.has(c.id)) {
-            const origin = multiDragInitialPositionsRef.current.get(c.id) || c.position || { x: 100, y: 100 };
-            return {
-              ...c,
-              position: {
-                x: Math.round((origin.x + deltaX) / SNAP) * SNAP,
-                y: Math.round((origin.y + deltaY) / SNAP) * SNAP
-              }
-            };
-          }
-          return c;
-        });
-      } else {
-        updatedClasses = diagram.classes.map(c => {
-          if (c.id === targetClassId) {
-            return {
-              ...c,
-              position: { x: finalPos.x, y: finalPos.y }
-            };
-          }
-          return c;
-        });
-      }
+      onUpdateDiagram(previous => {
+        let updatedClasses = previous.classes;
+        if (selected.size > 1 && selected.has(targetClassId) && initial) {
+          updatedClasses = previous.classes.map(c => {
+            if (selected.has(c.id)) {
+              const origin = origins.get(c.id) || c.position || { x: 100, y: 100 };
+              return {
+                ...c,
+                position: {
+                  x: Math.round((origin.x + deltaX) / SNAP) * SNAP,
+                  y: Math.round((origin.y + deltaY) / SNAP) * SNAP
+                }
+              };
+            }
+            return c;
+          });
+        } else {
+          updatedClasses = previous.classes.map(c => c.id === targetClassId
+            ? { ...c, position: { x: position.x, y: position.y } }
+            : c);
+        }
 
-      onUpdateDiagram({
-        ...diagram,
-        classes: updatedClasses,
-        updatedAt: new Date().toISOString()
+        return {
+          ...previous,
+          classes: updatedClasses,
+          updatedAt: new Date().toISOString()
+        };
       });
     }
 
@@ -1980,85 +1983,64 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
   // Create relation between two nodes (UML 2.5 rigorous mappings)
   const handleCompleteRelation = (sourceId: string, targetId: string) => {
-    const srcClass = diagram.classes.find(c => c.id === sourceId);
-    const tgtClass = diagram.classes.find(c => c.id === targetId);
+    const currentDiagram = diagramStateRef.current;
+    const srcClass = currentDiagram.classes.find(c => c.id === sourceId);
+    const tgtClass = currentDiagram.classes.find(c => c.id === targetId);
     if (!srcClass || !tgtClass) return;
 
-    // Regla UML 2.5 / 3FN: Si la relaciÃ³n seleccionada es Muchos a Muchos (N:M), descomponer automÃ¡ticamente en tabla intermedia
-    if (selectedRelationType === 'ASSOCIATION_N_M') {
-      createIntermediateTableNM(srcClass, tgtClass);
-      setConnectingMousePos(null);
-      return;
-    }
-
-    let defaultLabel = 'asocia';
     let srcMult = '1';
     let tgtMult = '*';
 
     switch (selectedRelationType) {
+      case 'ASSOCIATION_N_M':
+        srcMult = '*';
+        tgtMult = '*';
+        break;
       case 'ASSOCIATION_1_1':
-        defaultLabel = 'asocia';
         srcMult = '1';
         tgtMult = '1';
         break;
       case 'ASSOCIATION_1_N':
-        defaultLabel = 'asocia';
         srcMult = '1';
         tgtMult = '0..*';
         break;
       case 'COMPOSITION':
-        defaultLabel = 'compone';
         srcMult = '1';
         tgtMult = '1..*';
         break;
       case 'AGGREGATION':
-        defaultLabel = 'agrega';
         srcMult = '1';
         tgtMult = '0..*';
         break;
       case 'INHERITANCE':
-        defaultLabel = 'extiende';
         srcMult = '';
         tgtMult = '';
         break;
       case 'REALIZATION':
-        defaultLabel = 'implementa';
         srcMult = '';
         tgtMult = '';
         break;
       case 'DEPENDENCY':
       case 'USAGE':
-        defaultLabel = 'Â«useÂ»';
         srcMult = '';
         tgtMult = '';
         break;
       case 'PACKAGE_IMPORT':
-        defaultLabel = 'Â«importÂ»';
         srcMult = '';
         tgtMult = '';
         break;
       case 'ASSOCIATION_BINARY':
-        defaultLabel = 'asocia';
         srcMult = '';
         tgtMult = '';
         break;
       case 'NON_NAVIGABLE':
-        defaultLabel = 'no_navegable';
         srcMult = '1';
         tgtMult = '0';
         break;
     }
 
-    let finalSourceId = sourceId;
-    let finalTargetId = targetId;
-
-    if (selectedRelationType === 'ASSOCIATION_1_N') {
-      const dir = inferirDireccionMaestroTransaccion(srcClass.name, tgtClass.name);
-      if (!dir.origenEsMaestro) {
-        finalSourceId = targetId;
-        finalTargetId = sourceId;
-      }
-    }
+    const finalSourceId = sourceId;
+    const finalTargetId = targetId;
 
     const newRel: RelacionUml = {
       id: `rel-${Date.now()}`,
@@ -2067,15 +2049,15 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
       type: selectedRelationType,
       sourceMultiplicity: srcMult,
       targetMultiplicity: tgtMult,
-      label: defaultLabel
+      label: ''
     };
 
     if (onAddRelation) {
       onAddRelation(newRel);
     } else {
       onUpdateDiagram({
-        ...diagram,
-        relations: [...diagram.relations, newRel],
+        ...currentDiagram,
+        relations: [...currentDiagram.relations, newRel],
         updatedAt: new Date().toISOString()
       });
     }
@@ -2088,88 +2070,16 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   // â”€â”€â”€ GestiÃ³n Integral de Relaciones y Cardinalidad UML 2.5 â”€â”€â”€
 
   const handleUpdateRelation = (relationId: string, updates: Partial<RelacionUml>) => {
-    const updated = diagram.relations.map(r => {
-      if (r.id !== relationId) return r;
-      return { ...r, ...updates };
-    });
-
-    onUpdateDiagram({
-      ...diagram,
-      relations: updated,
-      updatedAt: new Date().toISOString()
+    if (userPermissions && !userPermissions.canEditDiagram) return;
+    onUpdateDiagram(previous => {
+      if (!previous.relations.some(r => r.id === relationId)) return previous;
+      return { ...previous, relations: previous.relations.map(r => r.id === relationId ? { ...r, ...updates } : r),
+        updatedAt: new Date().toISOString() };
     });
   };
 
   const handleChangeRelationType = (relationId: string, newType: TipoRelacion) => {
-    let defaultLabel = 'asocia';
-    let srcMult = '1';
-    let tgtMult = '*';
-
-    switch (newType) {
-      case 'ASSOCIATION_1_1':
-        defaultLabel = 'asocia';
-        srcMult = '1';
-        tgtMult = '1';
-        break;
-      case 'ASSOCIATION_1_N':
-        defaultLabel = 'asocia';
-        srcMult = '1';
-        tgtMult = '0..*';
-        break;
-      case 'ASSOCIATION_N_M':
-        defaultLabel = 'asocia';
-        srcMult = '*';
-        tgtMult = '*';
-        break;
-      case 'COMPOSITION':
-        defaultLabel = 'compone';
-        srcMult = '1';
-        tgtMult = '1..*';
-        break;
-      case 'AGGREGATION':
-        defaultLabel = 'agrega';
-        srcMult = '1';
-        tgtMult = '0..*';
-        break;
-      case 'INHERITANCE':
-        defaultLabel = 'extiende';
-        srcMult = '';
-        tgtMult = '';
-        break;
-      case 'REALIZATION':
-        defaultLabel = 'implementa';
-        srcMult = '';
-        tgtMult = '';
-        break;
-      case 'DEPENDENCY':
-      case 'USAGE':
-        defaultLabel = 'Â«useÂ»';
-        srcMult = '';
-        tgtMult = '';
-        break;
-      case 'PACKAGE_IMPORT':
-        defaultLabel = 'Â«importÂ»';
-        srcMult = '';
-        tgtMult = '';
-        break;
-      case 'ASSOCIATION_BINARY':
-        defaultLabel = 'asocia';
-        srcMult = '';
-        tgtMult = '';
-        break;
-      case 'NON_NAVIGABLE':
-        defaultLabel = 'no_navegable';
-        srcMult = '1';
-        tgtMult = '0';
-        break;
-    }
-
-    handleUpdateRelation(relationId, {
-      type: newType,
-      sourceMultiplicity: srcMult,
-      targetMultiplicity: tgtMult,
-      label: defaultLabel
-    });
+    handleUpdateRelation(relationId, { type: newType });
   };
 
   const handleInvertRelation = (relationId: string) => {
@@ -2178,8 +2088,10 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
     handleUpdateRelation(relationId, {
       sourceClassId: rel.targetClassId,
       targetClassId: rel.sourceClassId,
-      sourceMultiplicity: rel.targetMultiplicity || '1',
-      targetMultiplicity: rel.sourceMultiplicity || '*'
+      sourceMultiplicity: rel.targetMultiplicity,
+      targetMultiplicity: rel.sourceMultiplicity,
+      sourceRole: rel.targetRole,
+      targetRole: rel.sourceRole
     });
   };
 
@@ -2762,8 +2674,9 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           id: rel.id,
           pathD,
           label: rel.label || '',
-          srcMultiplicity: rel.sourceMultiplicity || '1',
-          tgtMultiplicity: rel.targetMultiplicity || '0..*',
+          srcMultiplicity: rel.sourceMultiplicity ?? '',
+          tgtMultiplicity: rel.targetMultiplicity ?? '',
+          sourceRole: rel.sourceRole, targetRole: rel.targetRole,
           type: rel.type,
           sourceClassId: rel.sourceClassId,
           targetClassId: rel.targetClassId,
@@ -3136,8 +3049,9 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         id: rel.id,
         pathD,
         label: rel.label || '',
-        srcMultiplicity: rel.sourceMultiplicity || '1',
-        tgtMultiplicity: rel.targetMultiplicity || '*',
+        srcMultiplicity: rel.sourceMultiplicity ?? '',
+        tgtMultiplicity: rel.targetMultiplicity ?? '',
+        sourceRole: rel.sourceRole, targetRole: rel.targetRole,
         type: rel.type,
         sourceClassId: rel.sourceClassId,
         targetClassId: rel.targetClassId,
@@ -3167,11 +3081,33 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   // Asi las tarjetas NO se re-renderizan al arrastrar una clase (solo la clase
   // arrastrada), manteniendo el mismo comportamiento previo (incluido STOMP).
   // ============================================================================
-  const handleStartCanvasLinking = useCallback((classId: string) => {
+  const handleStartCanvasLinking = (classId: string, event?: React.MouseEvent<HTMLButtonElement>) => {
+    if (userPermissions && !userPermissions.canEditDiagram) return;
     setCardFastLinkerClassId(null);
     setConnectingSourceId(classId);
     setConnectingMousePos(null);
-  }, []);
+    if (!event) return;
+    const startX = event.clientX, startY = event.clientY;
+    let moved = false;
+    const move = (e: MouseEvent) => {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) > 5) moved = true;
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) setConnectingMousePos({ x: (e.clientX - rect.left - panRef.current.x) / zoomRef.current,
+        y: (e.clientY - rect.top - panRef.current.y) / zoomRef.current });
+    };
+    const cleanup = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('blur', cancel); };
+    const cancel = () => { cleanup(); setConnectingSourceId(null); setConnectingMousePos(null); };
+    const up = (e: MouseEvent) => {
+      cleanup();
+      if (!moved) return; // A click supports selecting the destination separately.
+      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-class-id]')?.dataset.classId;
+      if (target && target !== classId && diagramStateRef.current.classes.some(c => c.id === target)) {
+        handleCompleteRelation(classId, target);
+      }
+      setConnectingSourceId(null); setConnectingMousePos(null); setIsRelationMode(false);
+    };
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up); window.addEventListener('blur', cancel);
+  };
 
   const handleSelectRelation = useCallback((relationId: string) => {
     setSelectedRelationId(relationId);
@@ -3375,8 +3311,21 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
   const stableOnDeleteRelation = useCallback((relationId: string) => {
     canvasHandlersRef.current.handleDeleteRelationSafe(relationId);
   }, []);
-  const stableOnStartCanvasLinking = useCallback((classId: string) => {
-    canvasHandlersRef.current.handleStartCanvasLinking(classId);
+  const stableOnEditMember = useCallback((classId: string, kind: 'attribute' | 'method', memberId: string, changes: Partial<AtributoUml & MetodoUml>) => {
+    if (userPermissions && !userPermissions.canEditDiagram) return;
+    if (Object.keys(changes).length === 0) return;
+    onUpdateDiagramRef.current(previous => {
+      if (!previous.classes.some(c => c.id === classId && (kind === 'attribute' ? c.attributes : c.methods).some(m => m.id === memberId))) return previous;
+      return { ...previous, classes: previous.classes.map(c => c.id !== classId ? c : {
+        ...c,
+        ...(kind === 'attribute' ? { attributes: c.attributes.map(a => a.id === memberId ? { ...a, ...changes } : a) }
+          : { methods: c.methods.map(m => m.id === memberId ? { ...m, ...changes } : m) })
+      }), updatedAt: new Date().toISOString() };
+    });
+  }, [userPermissions]);
+
+  const stableOnStartCanvasLinking = useCallback((classId: string, event?: React.MouseEvent<HTMLButtonElement>) => {
+    canvasHandlersRef.current.handleStartCanvasLinking(classId, event);
   }, []);
   const stableOnSelectRelation = useCallback((relationId: string) => {
     canvasHandlersRef.current.handleSelectRelation(relationId);
@@ -3646,7 +3595,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
         const isManyToMany = rel.type === 'ASSOCIATION_N_M' ||
           (['*', '0..*', '1..*'].includes(rel.sourceMultiplicity || '') && ['*', '0..*', '1..*'].includes(rel.targetMultiplicity || ''));
 
-        // Modo colapsado (pÃ­ldora minimalista que no tapa nada en el lienzo)
+        // Modo colapsado (píldora minimalista que no tapa nada en el lienzo)
         if (isRelationBarCollapsed) {
           return (
             <div
@@ -3676,7 +3625,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 <span style={{ color: '#f5e1ce', fontWeight: 800, fontSize: '0.76rem' }}>
                   {src?.name || 'Origen'}
                 </span>
-                <span style={{ color: '#e8c39e', fontSize: '0.72rem' }}>âž”</span>
+                <span style={{ color: '#e8c39e', fontSize: '0.72rem' }}>➔</span>
                 <span style={{ color: '#f5e1ce', fontWeight: 800, fontSize: '0.76rem' }}>
                   {tgt?.name || 'Destino'}
                 </span>
@@ -3713,7 +3662,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   borderRadius: '6px',
                   border: '1px solid rgba(232, 195, 158, 0.25)'
                 }}
-                title="Expandir panel de relaciÃ³n"
+                title="Expandir panel de relación"
               >
                 <span>Editar</span>
                 <ChevronDown size={13} />
@@ -3728,7 +3677,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 style={{
                   padding: '3px 6px',
                   border: 'none',
-                  color: 'var(--text-muted)',
+                  color: '#cbd5e1',
                   cursor: 'pointer',
                   borderRadius: '5px',
                   display: 'flex',
@@ -3748,13 +3697,13 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: 'var(--text-muted)',
+                  color: '#cbd5e1',
                   cursor: 'pointer',
                   padding: '3px',
                   display: 'flex',
                   alignItems: 'center'
                 }}
-                title="Deseleccionar relaciÃ³n (Escape)"
+                title="Deseleccionar relación (Escape)"
               >
                 <X size={14} />
               </button>
@@ -3790,7 +3739,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
           >
             {/* Fila 1: Entidades conectadas, Rol/Etiqueta y Acciones principales */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
-              {/* Clases conectadas con botÃ³n de inversiÃ³n */}
+              {/* Clases conectadas con botón de inversión */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                 <div style={{
                   width: '24px',
@@ -3828,15 +3777,16 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                     className="btn-studio-glass"
                     style={{
                       padding: '3px 7px',
+                      background: 'rgba(47, 44, 121, 0.8)',
                       fontSize: '0.72rem',
                       borderRadius: '6px',
                       color: '#e8c39e',
                       cursor: 'pointer',
                       border: '1px solid rgba(232, 195, 158, 0.25)'
                     }}
-                    title="Invertir direcciÃ³n Origen â‡„ Destino"
+                    title="Invertir dirección Origen ⇄ Destino"
                   >
-                    â‡„
+                    ⇄
                   </button>
                 )}
 
@@ -3854,14 +3804,15 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 </span>
               </div>
 
-              {/* Rol / Etiqueta de la relaciÃ³n */}
+              {/* Rol / Etiqueta de la relación */}
               {canEdit && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '0.70rem', color: '#e8c39e', fontWeight: 700, textTransform: 'uppercase' }}>
-                    Rol:
+                    Nombre:
                   </span>
                   <input
                     type="text"
+                    aria-label="Nombre de la relación"
                     value={rel.label || ''}
                     placeholder="ej. tiene, compone"
                     onChange={(e) => {
@@ -3882,7 +3833,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                 </div>
               )}
 
-              {/* Botones de acciÃ³n derecha */}
+              {/* Botones de acción derecha */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                 {/* Descomponer N:M si corresponde */}
                 {canEdit && isManyToMany && src && tgt && (
@@ -3904,7 +3855,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                         gap: '5px',
                         boxShadow: '0 2px 10px rgba(124, 58, 237, 0.4)'
                       }}
-                      title="Descomponer automÃ¡ticamente en Tabla Intermedia (UML 2.5 / 3FN)"
+                      title="Descomponer automáticamente en Tabla Intermedia (UML 2.5 / 3FN)"
                     >
                       <Sparkles size={12} color="#fef08a" />
                       <span>Descomponer (3FN)</span>
@@ -3933,7 +3884,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   </div>
                 )}
 
-                {/* BotÃ³n Eliminar */}
+                {/* Botón Eliminar */}
                 {canEdit && (
                   <button
                     onClick={(e) => {
@@ -3954,7 +3905,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                       gap: '4px',
                       transition: 'all 0.15s ease'
                     }}
-                    title="Eliminar esta conexiÃ³n (Tecla Supr)"
+                    title="Eliminar esta conexión (Tecla Supr)"
                   >
                     <Trash2 size={12} />
                     <span>Eliminar</span>
@@ -3963,7 +3914,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
 
                 <div style={{ width: '1px', height: '16px', background: 'rgba(245, 225, 206, 0.15)', margin: '0 2px' }} />
 
-                {/* BotÃ³n de Alternar PosiciÃ³n Arriba/Abajo */}
+                {/* Botón de Alternar Posición Arriba/Abajo */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -3973,7 +3924,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   style={{
                     padding: '4px 6px',
                     border: 'none',
-                    color: 'var(--text-muted)',
+                    color: '#cbd5e1',
                     cursor: 'pointer',
                     borderRadius: '5px',
                     display: 'flex',
@@ -3984,7 +3935,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   <ArrowUpDown size={13} />
                 </button>
 
-                {/* BotÃ³n Minimizar */}
+                {/* Botón Minimizar */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -3994,18 +3945,18 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   style={{
                     padding: '4px 6px',
                     border: 'none',
-                    color: 'var(--text-muted)',
+                    color: '#cbd5e1',
                     cursor: 'pointer',
                     borderRadius: '5px',
                     display: 'flex',
                     alignItems: 'center'
                   }}
-                  title="Minimizar barra a pÃ­ldora compacta"
+                  title="Minimizar barra a píldora compacta"
                 >
                   <ChevronUp size={13} />
                 </button>
 
-                {/* BotÃ³n Cerrar selecciÃ³n */}
+                {/* Botón Cerrar selección */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -4015,21 +3966,32 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: 'var(--text-muted)',
+                    color: '#cbd5e1',
                     cursor: 'pointer',
                     padding: '4px',
                     display: 'flex',
                     alignItems: 'center',
                     borderRadius: '5px'
                   }}
-                  title="Deseleccionar conexiÃ³n (Escape)"
+                  title="Deseleccionar conexión (Escape)"
                 >
                   <X size={14} />
                 </button>
               </div>
             </div>
 
-            {/* Fila 2: SemÃ¡ntica UML, Multiplicidades y Presets en 1 clic */}
+            {canEdit && !isSpecialNoMult && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label style={{ fontSize: '0.7rem', color: '#f5e1ce' }}>Rol en {src?.name || 'origen'}{' '}
+                <input aria-label="Rol del extremo origen" value={rel.sourceRole || ''} onChange={e => handleUpdateRelation(rel.id, { sourceRole: e.target.value })}
+                  style={{ width: 110, background: 'rgba(15,23,42,.65)', color: '#f5e1ce', border: '1px solid rgba(245,225,206,.18)', borderRadius: 6, padding: '4px 7px' }} />
+              </label>
+              <label style={{ fontSize: '0.7rem', color: '#f5e1ce' }}>Rol en {tgt?.name || 'destino'}{' '}
+                <input aria-label="Rol del extremo destino" value={rel.targetRole || ''} onChange={e => handleUpdateRelation(rel.id, { targetRole: e.target.value })}
+                  style={{ width: 110, background: 'rgba(15,23,42,.65)', color: '#f5e1ce', border: '1px solid rgba(245,225,206,.18)', borderRadius: 6, padding: '4px 7px' }} />
+              </label>
+            </div>}
+
+            {/* Fila 2: Semántica UML, Multiplicidades y Presets en 1 clic */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -4037,7 +3999,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
               borderTop: '1px solid rgba(245, 225, 206, 0.1)',
               paddingTop: '8px'
             }}>
-              {/* Selector de Tipo de RelaciÃ³n */}
+              {/* Selector de Tipo de Relación */}
               {canEdit && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                   <span style={{ fontSize: '0.68rem', color: '#e8c39e', fontWeight: 700, textTransform: 'uppercase' }}>
@@ -4065,15 +4027,15 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                     <option value="ASSOCIATION_1_1">1:1 (Uno a Uno)</option>
                     <option value="ASSOCIATION_N_M">N:M (Muchos a Muchos)</option>
                     <option value="ASSOCIATION_BINARY">Binaria Simple</option>
-                    <option value="ASSOCIATION_CLASS">Clase Asociativa (â•Œ)</option>
-                    <option value="COMPOSITION">ComposiciÃ³n (â—† Todo-Parte)</option>
-                    <option value="AGGREGATION">AgregaciÃ³n (â—‡ Agregado)</option>
-                    <option value="INHERITANCE">Herencia (â–³ Extiende)</option>
-                    <option value="REALIZATION">RealizaciÃ³n (â•Œâ–³ Implementa)</option>
-                    <option value="DEPENDENCY">Dependencia (â•Œ&gt; Usa)</option>
-                    <option value="USAGE">Â«useÂ» (Uso)</option>
-                    <option value="PACKAGE_IMPORT">Â«importÂ»</option>
-                    <option value="NON_NAVIGABLE">No Navegable (âœ•)</option>
+                    <option value="ASSOCIATION_CLASS">Clase Asociativa (╌)</option>
+                    <option value="COMPOSITION">Composición (◆ Todo-Parte)</option>
+                    <option value="AGGREGATION">Agregación (◇ Agregado)</option>
+                    <option value="INHERITANCE">Herencia (△ Extiende)</option>
+                    <option value="REALIZATION">Realización (╌△ Implementa)</option>
+                    <option value="DEPENDENCY">Dependencia (╌&gt; Usa)</option>
+                    <option value="USAGE">«use» (Uso)</option>
+                    <option value="PACKAGE_IMPORT">«import»</option>
+                    <option value="NON_NAVIGABLE">No Navegable (✕)</option>
                   </select>
                 </div>
               )}
@@ -4084,67 +4046,21 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   <div style={{ width: '1px', height: '18px', background: 'rgba(245, 225, 206, 0.12)', flexShrink: 0 }} />
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Card:</span>
-                    <select
-                      value={rel.sourceMultiplicity || '1'}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        handleUpdateRelation(rel.id, { sourceMultiplicity: e.target.value });
-                      }}
-                      style={{
-                        background: 'rgba(15, 23, 42, 0.75)',
-                        border: '1px solid rgba(232, 195, 158, 0.35)',
-                        color: '#e8c39e',
-                        borderRadius: '6px',
-                        padding: '3px 6px',
-                        fontSize: '0.74rem',
-                        fontWeight: 800,
-                        fontFamily: 'monospace',
-                        cursor: 'pointer'
-                      }}
-                      title="Multiplicidad del extremo origen"
-                    >
-                      <option value="1">1</option>
-                      <option value="0..1">0..1</option>
-                      <option value="*">*</option>
-                      <option value="0..*">0..*</option>
-                      <option value="1..*">1..*</option>
-                    </select>
+                    <span style={{ fontSize: '0.68rem', color: '#cbd5e1', fontWeight: 600 }}>Card:</span>
+                    <UmlMultiplicityInput label="Multiplicidad del extremo origen" value={rel.sourceMultiplicity ?? ''}
+                      onCommit={value => handleUpdateRelation(rel.id, { sourceMultiplicity: value })} />
 
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>âž”</span>
+                    <span style={{ color: '#cbd5e1', fontSize: '0.72rem' }}>➔</span>
 
-                    <select
-                      value={rel.targetMultiplicity || '*'}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        handleUpdateRelation(rel.id, { targetMultiplicity: e.target.value });
-                      }}
-                      style={{
-                        background: 'rgba(15, 23, 42, 0.75)',
-                        border: '1px solid rgba(232, 195, 158, 0.35)',
-                        color: '#e8c39e',
-                        borderRadius: '6px',
-                        padding: '3px 6px',
-                        fontSize: '0.74rem',
-                        fontWeight: 800,
-                        fontFamily: 'monospace',
-                        cursor: 'pointer'
-                      }}
-                      title="Multiplicidad del extremo destino"
-                    >
-                      <option value="*">*</option>
-                      <option value="0..*">0..*</option>
-                      <option value="1..*">1..*</option>
-                      <option value="1">1</option>
-                      <option value="0..1">0..1</option>
-                    </select>
+                    <UmlMultiplicityInput label="Multiplicidad del extremo destino" value={rel.targetMultiplicity ?? ''}
+                      onCommit={value => handleUpdateRelation(rel.id, { targetMultiplicity: value })} />
                   </div>
 
                   <div style={{ width: '1px', height: '18px', background: 'rgba(245, 225, 206, 0.12)', flexShrink: 0 }} />
 
-                  {/* Presets RÃ¡pidos de Cardinalidad en 1 clic */}
+                  {/* Presets Rápidos de Cardinalidad en 1 clic */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontWeight: 600, marginRight: '2px' }}>
+                    <span style={{ fontSize: '0.66rem', color: '#cbd5e1', fontWeight: 600, marginRight: '2px' }}>
                       Presets:
                     </span>
                     {[
@@ -4173,7 +4089,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                             fontFamily: 'monospace',
                             background: isActive ? 'rgba(232, 195, 158, 0.24)' : 'rgba(255, 255, 255, 0.05)',
                             border: isActive ? '1px solid #e8c39e' : '1px solid rgba(245, 225, 206, 0.12)',
-                            color: isActive ? '#f5e1ce' : 'var(--text-secondary)',
+                            color: isActive ? '#f5e1ce' : '#cbd5e1',
                             borderRadius: '6px',
                             cursor: 'pointer',
                             transition: 'all 0.15s ease'
@@ -4189,7 +4105,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                   {/* Selector de Clase Asociativa Vinculada (UML 2.5) */}
                   <div style={{ width: '1px', height: '18px', background: 'rgba(245, 225, 206, 0.12)', flexShrink: 0 }} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.66rem', color: '#e8c39e', fontWeight: 700 }} title="Vincular con una Clase Asociativa (LÃ­nea discontinua UML 2.5)">
+                    <span style={{ fontSize: '0.66rem', color: '#e8c39e', fontWeight: 700 }} title="Vincular con una Clase Asociativa (Línea discontinua UML 2.5)">
                       Clase Asoc:
                     </span>
                     <select
@@ -4215,7 +4131,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
                         .filter(c => c.id !== rel.sourceClassId && c.id !== rel.targetClassId)
                         .map(c => (
                           <option key={c.id} value={c.id}>
-                            {c.name} {c.stereotype === 'AssociationClass' ? 'Â«AssocÂ»' : ''}
+                            {c.name} {c.stereotype === 'AssociationClass' ? '«Assoc»' : ''}
                           </option>
                         ))}
                     </select>
@@ -4304,7 +4220,6 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             methodReturnType={methodReturnType}
             methodParams={methodParams}
             methodVis={methodVis}
-            selectedRelationId={selectedRelationId}
             nodeDimensionsRef={nodeDimensionsRef}
             setDimensionTick={setDimensionTick}
             onMouseDown={ghostIds.has(cls.id)?onGhostMouseDown:stableOnClassMouseDown}
@@ -4312,6 +4227,7 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             onSaveEditingClass={stableOnSaveEditingClass}
             onDeleteClass={onDeleteClass}
             onDeleteAttribute={onDeleteAttribute}
+            onEditMember={stableOnEditMember}
             onDeleteMethod={onDeleteMethod}
             onSaveAttribute={stableOnSaveAttribute}
             onSaveMethod={stableOnSaveMethod}
@@ -4319,7 +4235,6 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             onAddAuditFields={stableOnAddAuditFields}
             onFastLinkSubmit={stableOnFastLinkSubmit}
             onStartCanvasLinking={stableOnStartCanvasLinking}
-            onDeleteRelation={stableOnDeleteRelation}
             onAutoCompletarClase={onAutoCompletarClase}
             setEditingClassStereotype={setEditingClassStereotype}
             setEditingClassName={setEditingClassName}
@@ -4338,7 +4253,6 @@ export const InteractiveStudioCanvas: React.FC<InteractiveStudioCanvasProps> = (
             setMethodReturnType={setMethodReturnType}
             setMethodParams={setMethodParams}
             setMethodVis={setMethodVis}
-            setSelectedRelationId={setSelectedRelationId}
           />
         ))}
 
